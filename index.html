@@ -1498,9 +1498,9 @@ function explainLine(text, langId) {
   // 规则没命中：按行的形态给最保守的猜测；猜不出就明说没看懂，
   // 不再用「这行执行：xxx」把原代码抄一遍（那是套话，不是解释）。
   let m;
-  if ((m = s.match(/^([\w$.\[\]'"]+)\s*[[+\-*\/%]=?]=?\s*(.+?);?$/)) && /[+\-*\/%]=/.test(s)) {
+  if ((m = s.match(/^([\w$.\[\]'"]+)\s*([+\-*/%])=\s*(.+?);?$/))) {
     const opMap = { '+': '加', '-': '减', '*': '乘', '/': '除', '%': '取余' };
-    return { note: '在「' + m[1] + '」原来的值上' + (opMap[m[2]] || '加') + '「' + m[3] + '」', tag: 'assign', fallback: true };
+    return { note: '在「' + m[1] + '」原来的值上' + opMap[m[2]] + '「' + m[3] + '」', tag: 'assign', fallback: true };
   }
   if ((m = s.match(/^([\w$]+)\.(\w+)\s*\(.*\)\s*;?$/))) {
     return { note: '调用「' + m[1] + '」的「' + m[2] + '」方法', tag: 'call', fallback: true };
@@ -1822,13 +1822,14 @@ function currentLang(code) {
   if (sel !== 'auto') return sel;
   return detectLanguage(code);
 }
-function doExplain() {
+function doExplain(quiet) {
   const code = $('code').value;
   if (!code.trim()) {
     lastResult = null;
     $('tab-overall').innerHTML = '<div class="empty">代码是空的，先粘一段进来。</div>';
     $('tab-lines').innerHTML = '<div class="empty">还没解释。</div>';
     $('tab-keywords').innerHTML = '<div class="empty">还没解释。</div>';
+    setFilterCounts(0, 0);
     updateLangChip(null);
     return;
   }
@@ -1841,7 +1842,7 @@ function doExplain() {
   lastResult.confident = det ? det.confident : true;
   renderAll(lastResult);
   updateLangChip(lastResult);
-  if (auto && det && !det.confident) toast('这段代码像好几种语言，点顶上「识别」看候选', 2600);
+  if (!quiet && auto && det && !det.confident) toast('这段代码像好几种语言，点顶上「识别」看候选', 2600);
 }
 function renderAll(res) {
   renderOverall(res);
@@ -2639,7 +2640,7 @@ $('lang').value = LS.get('ce.lang', 'auto');
 const savedCode = LS.get('ce.code', '');
 if (savedCode) $('code').value = savedCode;
 syncGutter();
-if ($('code').value.trim()) doExplain();
+if ($('code').value.trim()) doExplain(true);
 refreshAIUI();
 setView('code');
 $('verText').textContent = '版本 ' + APP_VERSION + ' · ' + (nativePlatform ? 'app' : 'pwa');
