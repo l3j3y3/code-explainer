@@ -1,0 +1,10 @@
+{
+  "version": "1.2.0",
+  "build": 6,
+  "apk": "apk/code-explainer.apk",
+  "notes": "feat: 反馈弹层 + 自动检查更新",
+  "feedback": {
+    "issues": false,
+    "repo": "l3j3y3/code-explainer"
+  }
+}
