@@ -101,3 +101,15 @@ jobs:
             --title "代码解释器 app v${{ github.run_number }}" \
             --notes "手机点下面的 APK 直接装（首次要允许「安装未知应用」）。离线可用；AI 通道要自己在设置里填 DeepSeek key。" \
             --latest
+
+      # 手机上从 Release 下可能被墙，同一份 APK 再放到 Pages 上（主站在 l3j3y3.github.io，国内通常能开）
+      - name: Publish APK to Pages
+        run: |
+          set -e
+          mkdir -p apk
+          cp "code-explainer-app-${{ github.run_number }}.apk" apk/code-explainer.apk
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f apk/code-explainer.apk
+          git commit -m "ci: publish apk build ${{ github.run_number }}" || echo "nothing to commit"
+          git push origin HEAD:main
