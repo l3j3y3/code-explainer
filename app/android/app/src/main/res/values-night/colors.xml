@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 深色模式下顶栏/底栏是 #161b22，状态栏与手势条那两条带跟着走，别留一条浅色缝 -->
+    <color name="appSurface">#161b22</color>
+</resources>

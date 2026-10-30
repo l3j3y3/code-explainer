@@ -4,4 +4,6 @@
     <color name="colorPrimaryDark">#1d4ed8</color>
     <color name="colorAccent">#2563eb</color>
     <color name="appBackground">#f5f6f8</color>
+    <!-- 顶栏/底栏（面板）色。Android 15+ 强制边到边后，状态栏与手势条那两条带露出的是这个色 -->
+    <color name="appSurface">#ffffff</color>
 </resources>

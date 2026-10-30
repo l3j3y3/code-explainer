@@ -11,8 +11,10 @@
 ## 功能
 
 - 8 种语言自动识别：Python / C / C++ / Java / JavaScript / SQL / HTML / CSS
-- **整体**：一句话总结 + 主要步骤 + 定义清单 + 行数统计
-- **逐行**：每一行代码配一句中文说明，可筛「只看有说明」
+  - 识别按信号打分，**候选全列**：顶栏「识别」那一格能点开，看到每种语言的分数和命中的理由，点一条就按它解释
+  - 认不出就标「纯文本」，不再硬套 Python
+- **整体**：一句话总结 + 结构块（第几行到第几行是什么类/函数）+ 主要步骤 + 行数统计
+- **逐行**：按结构块聚合成卡片（空行折叠），每行配一句中文说明；「全部 / 只看要点」带行数，没被规则覆盖的行是淡色一句，不占正经解释
 - **词表**：出现的关键字/内置/运算符，点开看含义 + 示例 + 官方文档链接；点行号能跳回逐行并高亮
 - **AI 通道（可选）**：设置里填自己的 DeepSeek API key 后
   - 整体「AI 详解」——流式生成，比离线规则更懂语义
@@ -33,6 +35,18 @@ app/                Capacitor 安卓壳（webDir = app/dist，由 scripts/stage.
 app/android/        原生工程；签名说明见 app/android/app/README-signing.md
 .github/workflows/android.yml   推 main 自动构建 APK 并发布
 ```
+
+## 状态栏与 Android 15+
+
+`targetSdk 36` 之后，Android 15/16 强制 edge-to-edge：状态栏变透明、盖在 WebView 上面。
+这时 `@capacitor/status-bar` 的 `setOverlaysWebView(false)` 和 `setBackgroundColor` 在 API > 35
+都是空操作（见它的 `shouldSetStatusBarColor()`），WebView 里 `env(safe-area-inset-top)` 也是 0
+——顶栏控件会被状态栏压住、点不到。
+
+修法在 `app/android/app/src/main/java/com/l3j3y3/codeexplainer/MainActivity.java`：
+API >= 35 时给 WebView 装 `ViewCompat.setOnApplyWindowInsetsListener`，把
+`systemBars | displayCutout` 的尺寸作为 padding 让出来；**不要装到 `android.R.id.content` 上**，
+Capacitor Keyboard 插件已经占了那个 listener。Web 侧在 `body.is-native` 时不再叠 `env()`。
 
 ## 改完怎么更新
 
