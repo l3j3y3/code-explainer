@@ -1,4 +1,4 @@
-const CACHE = 'code-explainer-v3';
+const CACHE = 'code-explainer-v4';
 const ASSETS = ['./', './index.html', './manifest.json', './icons/icon-192.png', './icons/icon-512.png'];
 
 self.addEventListener('install', event => {
@@ -16,11 +16,19 @@ self.addEventListener('activate', event => {
 });
 
 // 页面导航走网络优先（改了 index.html 一次启动就生效），断网回缓存；其余资源缓存优先、后台更新
+// version.json 例外：它是更新检查用的，必须每次拿网络上的真值，缓存下来就等于永远「已是最新」
 self.addEventListener('fetch', event => {
   const req = event.request;
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
+
+  if (url.pathname.endsWith('/version.json')) {
+    event.respondWith(
+      fetch(req).catch(() => new Response('{}', { headers: { 'content-type': 'application/json' } }))
+    );
+    return;
+  }
 
   if (req.mode === 'navigate') {
     event.respondWith(

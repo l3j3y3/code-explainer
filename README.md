@@ -23,17 +23,23 @@
   - 底部可以追问
   - key 只存在本机（网页放 localStorage，APK 里同样），不上传；关掉 AI 就是纯离线，一个字都不发
 - 粘贴即用、自动记住上次那段代码和语言
+- **反馈**：⋯ →「反馈 / 提问题」，选类型、写内容，然后自己选出路——复制、发邮件（预填到 `liujiayejiaye@163.com`）、
+  或者「去 GitHub 提 issue」（仓库 Issues 开着时才出现）。默认只带版本/平台/识别语言，**代码要手动勾**才附前 30 行
+- **检查更新**：启动后静默读 Pages 上的 `version.json`（12 小时最多一次），有新版本时 ⋯ 里会冒出
+  「更新到 x.y.z」；PWA 点了刷新换新版，APK 点了跳浏览器下载新包。⋯ 里也常驻「检查更新」可手动点。
+  不做静默自动安装——Android 装包必须本人在安装器里点一下
 
 ## 目录
 
 ```
-index.html          网页本体（单文件：样式 + 词典 + 分词/解释器 + UI + AI 调用）
+index.html          网页本体（单文件：样式 + 词典 + 分词/解释器 + UI + AI 调用 + 反馈/更新检查）
 manifest.json       PWA 清单
-sw.js               Service Worker（导航网络优先、资源缓存优先；原生壳里不注册）
+sw.js               Service Worker（导航网络优先、资源缓存优先、version.json 直连网络；原生壳里不注册）
+version.json        更新检查用的「真值」文件，**CI 生成，不手改**
 icons/              PWA 图标
 app/                Capacitor 安卓壳（webDir = app/dist，由 scripts/stage.mjs 从根目录拷 4 个文件）
 app/android/        原生工程；签名说明见 app/android/app/README-signing.md
-.github/workflows/android.yml   推 main 自动构建 APK 并发布
+.github/workflows/android.yml   推 main 自动构建 APK、写 version.json 并发布
 ```
 
 ## 状态栏与 Android 15+
@@ -50,9 +56,16 @@ Capacitor Keyboard 插件已经占了那个 listener。Web 侧在 `body.is-nativ
 
 ## 改完怎么更新
 
-- **只改网页**：改 `index.html` → 把 `sw.js` 里的 `CACHE` 版本号加一 → `git push`，Pages 一两分钟更新。
-- **连 APK 一起更新**：动一下 `app/**` 里任意文件（或去 Actions 页手动 `Run workflow`）→ CI 出 `vN` 包，
-  Release 与 `apk/code-explainer.apk` 同时更新；手机重装覆盖即可，设置不丢。
+发版清单（缺一条就会「提示有新版本但装下来还是旧的」）：
+
+1. 改 `index.html` 里的 `APP_VERSION`（例如 `1.2.0` → `1.3.0`）——它是 App 版本、APK 的 versionName、
+   以及 CI 写进 `version.json` 的 `version` 的唯一来源。
+2. 把 `sw.js` 里的 `CACHE` 加一（`code-explainer-v4` → `v5`），PWA 才会换掉旧缓存。
+3. `git push` 到 main：Pages 一两分钟更新；同时 CI 出 `vN` 包，Release 与 `apk/code-explainer.apk`、
+   `version.json` 一起更新。手机重装覆盖即可，设置不丢。
+
+`version.json` 由 CI 覆盖生成，**不要手改**；要在真机上看「发现新版本」的提示，可以临时把它推到更高版本，
+验完再让 CI 覆盖回来。
 
 ## 本地跑
 

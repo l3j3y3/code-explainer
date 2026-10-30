@@ -288,6 +288,18 @@
   .lang-item .li-bar i { display: block; height: 100%; background: var(--accent); }
   .lang-item .li-why { font-size: 12.5px; color: var(--muted); }
   .lang-sep { padding: 12px 4px 4px; font-size: 12px; color: var(--muted); }
+  /* 反馈弹层 */
+  .fb-kinds { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 10px; }
+  .fb-kind {
+    height: 30px; padding: 0 11px; border-radius: 15px; font-size: 13px;
+    border: 1px solid var(--border); background: var(--panel); color: var(--muted);
+  }
+  .fb-kind.active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); font-weight: 600; }
+  #fbText {
+    width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border);
+    background: var(--bg); font-size: 14px; line-height: 1.6; resize: vertical; margin-bottom: 8px;
+  }
+  .menu-item.new { color: var(--accent); font-weight: 600; }
   .menu-item {
     display: block; width: 100%; text-align: left; padding: 13px 4px;
     border: 0; border-bottom: 1px solid var(--border); background: transparent; font-size: 15px;
@@ -422,9 +434,11 @@
 <div class="mask" id="mask" hidden></div>
 
 <div class="sheet" id="sheetMore" hidden>
+  <button class="menu-item" id="miUpdate">检查更新</button>
   <button class="menu-item" id="miPaste">粘贴剪贴板</button>
   <button class="menu-item" id="miCopy">复制代码</button>
   <button class="menu-item" id="miClear">清空代码</button>
+  <button class="menu-item" id="miFeedback">反馈 / 提问题</button>
   <button class="menu-item" id="miSettings">设置 / AI 通道</button>
   <button class="menu-item" id="miAbout">关于</button>
 </div>
@@ -464,6 +478,33 @@
   <h3>这段代码像什么语言</h3>
   <p class="hint">按识别信号打分排的；点一条就按它解释，选完还能随时在顶上换回自动识别。</p>
   <div id="langList"></div>
+</div>
+
+<div class="sheet" id="sheetFeedback" hidden>
+  <h3>反馈</h3>
+  <p class="hint">哪一步出的问题？说清楚「你粘了什么、看到什么、本来想看到什么」，最好带上那条命令/那段代码。</p>
+  <div class="fb-kinds" id="fbKinds">
+    <button class="fb-kind active" data-kind="识别错了">识别错了</button>
+    <button class="fb-kind" data-kind="解释不对">解释不对</button>
+    <button class="fb-kind" data-kind="界面问题">界面问题</button>
+    <button class="fb-kind" data-kind="想要的功能">想要的功能</button>
+    <button class="fb-kind" data-kind="其他">其他</button>
+  </div>
+  <textarea id="fbText" rows="5" placeholder="比如：粘 `CREATE DATABASE demo;` 能被认成 SQL，但 `CREATE SCHEMA demo;` 又被认成 Python 了。"></textarea>
+  <label class="switch-row">
+    <span>附带当前代码（前 30 行）</span>
+    <input type="checkbox" id="fbWithCode">
+  </label>
+  <p class="hint" id="fbDiag"></p>
+  <div class="sheet-actions">
+    <button class="btn primary" id="fbCopy">复制反馈内容</button>
+    <button class="btn" id="fbMail">发邮件</button>
+  </div>
+  <div class="sheet-actions">
+    <button class="btn" id="fbIssue" hidden>去 GitHub 提 issue</button>
+    <button class="btn" id="fbClear">清空</button>
+  </div>
+  <p class="hint">反馈不会自动上传：复制、邮件、GitHub 都要你自己点出去。没装邮件 App 就用复制。</p>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -2447,7 +2488,7 @@ function openSheet(id) {
 }
 function closeSheets() {
   $('mask').hidden = true;
-  ['sheetMore', 'sheetSettings', 'sheetLang'].forEach(id => { $(id).hidden = true; });
+  ['sheetMore', 'sheetSettings', 'sheetLang', 'sheetFeedback'].forEach(id => { $(id).hidden = true; });
 }
 function openSettings() {
   closeSheets();
@@ -2500,20 +2541,234 @@ async function pasteIntoCode() {
   doExplain();
   toast('已粘贴 ' + t.split('\n').length + ' 行');
 }
+async function copyText(t) {
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) { await navigator.clipboard.writeText(t); return true; }
+  } catch (e) {}
+  try {
+    const C = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Clipboard;
+    if (C && C.write) { await C.write({ string: t }); return true; }
+  } catch (e) {}
+  return false;
+}
 async function copyCode() {
   const t = $('code').value;
   if (!t) { toast('没代码可复制'); return; }
-  try {
-    if (navigator.clipboard && navigator.clipboard.writeText) { await navigator.clipboard.writeText(t); }
-    else {
-      const C = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Clipboard;
-      if (C && C.write) await C.write({ string: t });
-      else throw new Error('no clipboard');
-    }
-    toast('已复制');
-  } catch (e) {
-    toast('复制不了，长按输入框全选手动复制');
+  if (await copyText(t)) toast('已复制');
+  else toast('复制不了，长按输入框全选手动复制');
+}
+
+/* ================= 更新检查 =================
+   更新源是 Pages 上的 version.json（CI 每次出包重新生成）。
+   sw.js 对非导航请求是缓存优先，所以请求要带时间戳、并且 sw 里给这个路径单独放行。 */
+const FEED_URL = nativePlatform
+  // APK 里的页面来自 https://localhost，相对路径会 404，必须打线上；
+  // GitHub Pages 回 access-control-allow-origin: *（实测），跨域读得到
+  ? 'https://l3j3y3.github.io/code-explainer/version.json'
+  : 'version.json';
+// APK 里没有 apk/ 目录，feed 里的相对路径要按站点根解析，不能按 https://localhost 解析
+const APP_HOME = 'https://l3j3y3.github.io/code-explainer/';
+const FEED_TTL = 12 * 3600 * 1000;
+let feedMem = null;
+
+function cmpVersion(a, b) {
+  const pa = String(a || '').split('.').map(x => parseInt(x, 10) || 0);
+  const pb = String(b || '').split('.').map(x => parseInt(x, 10) || 0);
+  const n = Math.max(pa.length, pb.length);
+  for (let i = 0; i < n; i++) {
+    const x = pa[i] || 0, y = pb[i] || 0;
+    if (x !== y) return x < y ? -1 : 1;
   }
+  return 0;
+}
+
+function readCachedFeed() {
+  const raw = LS.get('ce.feed', '');
+  if (!raw) return null;
+  try { return JSON.parse(raw) || null; } catch (e) { return null; }
+}
+
+async function getFeed(force) {
+  if (window.__ceFeed) return window.__ceFeed;      // 测试注入点
+  if (!force && feedMem) return feedMem;
+  const cached = readCachedFeed();
+  if (!force && cached && cached.__t && Date.now() - cached.__t < FEED_TTL) { feedMem = cached; return cached; }
+  try {
+    const r = await fetch(FEED_URL + '?ts=' + Date.now(), { cache: 'no-store' });
+    if (!r.ok) throw new Error('http ' + r.status);
+    const data = await r.json();
+    if (!data || !data.version) throw new Error('bad feed');
+    data.__t = Date.now();
+    feedMem = data;
+    LS.set('ce.feed', JSON.stringify(data));
+    return data;
+  } catch (e) {
+    return feedMem || cached;
+  }
+}
+
+function feedIsNewer(feed) {
+  return !!(feed && feed.version && cmpVersion(feed.version, APP_VERSION) > 0);
+}
+
+function syncUpdateMenu(feed) {
+  const el = $('miUpdate');
+  if (!el) return;
+  if (feedIsNewer(feed)) {
+    el.textContent = '更新到 ' + feed.version + '（构建 ' + (feed.build || '?') + '）';
+    el.classList.add('new');
+  } else {
+    el.textContent = '检查更新';
+    el.classList.remove('new');
+  }
+}
+
+async function checkUpdate(quiet) {
+  const feed = await getFeed(true);
+  syncUpdateMenu(feed);
+  if (!feed) {
+    if (!quiet) toast('检查失败：离线或接口不通', 3000);
+    return null;
+  }
+  if (feedIsNewer(feed)) {
+    if (quiet) toast('有新版本 ' + feed.version + '，点 ⋯ 里的「更新到 ' + feed.version + '」', 3800);
+    return feed;
+  }
+  if (!quiet) toast('已是最新 ' + APP_VERSION + (feed.build ? '（构建 ' + feed.build + '）' : ''), 3000);
+  return null;
+}
+
+function applyUpdate(feed) {
+  if (!feed) return;
+  if (nativePlatform) {
+    // 跨域链接会被 Capacitor 的 launchIntent 交给系统浏览器，浏览器再走 APK 下载
+    const url = new URL(feed.apk || 'apk/code-explainer.apk', APP_HOME).href;
+    openExternal(url);
+    toast('在浏览器里下载新版 APK，装完覆盖即可，设置不丢', 3600);
+    return;
+  }
+  const reg = (navigator.serviceWorker && navigator.serviceWorker.getRegistration)
+    ? navigator.serviceWorker.getRegistration() : Promise.resolve(null);
+  Promise.resolve(reg)
+    .then(r => (r && r.update ? r.update().catch(() => {}) : null))
+    .catch(() => {})
+    .then(() => setTimeout(() => location.reload(), 450));
+}
+
+function openExternal(url) {
+  // Capacitor 里 window.open 会被吞（没开多窗口），得靠同窗口点 <a> 触发 shouldOverrideUrlLoading
+  if (nativePlatform || /^mailto:/i.test(url)) {
+    const a = document.createElement('a');
+    a.href = url;
+    a.rel = 'noopener';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    return;
+  }
+  window.open(url, '_blank', 'noopener');
+}
+
+/* ================= 反馈 =================
+   不自动上传：拼好一段文本，用户自己选「复制 / 邮件 / GitHub」。
+   默认只带版本、平台、识别语言；代码要手动勾，避免把代码顺手公开出去。 */
+const FEEDBACK_MAIL = 'liujiayejiaye@163.com';
+const FEEDBACK_REPO = 'l3j3y3/code-explainer';
+const FB_CODE_LINES = 30;
+const FB_URL_LIMIT = 5500;      // encodeURIComponent 之后的长度上限
+let fbKind = '识别错了';
+
+function fbLangText() {
+  if (!lastResult) return '（还没解释）';
+  const how = lastResult.autoLang ? (lastResult.confident ? '自动识别' : '自动识别，不确定') : '手动指定';
+  let t = langLabel(lastResult.lang) + '（' + how + '）';
+  if (lastResult.candidates && lastResult.candidates.length > 1) {
+    t += '，候选 ' + lastResult.candidates.slice(0, 3).map(c => c.label + ' ' + c.score).join(' · ');
+  }
+  return t;
+}
+
+function fbPageText() {
+  return currentView === 'code' ? '代码' : currentView === 'lines' ? '逐行' : currentView === 'words' ? '词表' : '整体';
+}
+
+function buildFeedbackText(opts) {
+  const o = opts || {};
+  const kind = o.kind || fbKind;
+  const body = String(o.text === undefined ? '' : o.text).trim() || '（没写正文）';
+  const withCode = o.withCode === undefined ? false : !!o.withCode;
+  const lines = [];
+  lines.push('### 反馈：' + kind);
+  lines.push(body);
+  lines.push('');
+  lines.push('---');
+  lines.push('版本：' + APP_VERSION + ' · ' + (nativePlatform ? 'app（Android WebView）' : 'pwa'));
+  lines.push('识别语言：' + fbLangText());
+  lines.push('页面：' + (o.page || fbPageText()));
+  lines.push('时间：' + new Date().toISOString());
+  if (withCode) {
+    const code = o.code === undefined ? $('code').value : String(o.code || '');
+    const arr = code.split('\n').slice(0, FB_CODE_LINES);
+    if (code.trim()) {
+      const fence = '```' + (lastResult && lastResult.lang && lastResult.lang !== 'plain' ? lastResult.lang : '');
+      lines.push('');
+      lines.push('代码（前 ' + arr.length + ' 行' + (code.split('\n').length > FB_CODE_LINES ? '，已截断' : '') + '）：');
+      lines.push(fence);
+      lines.push(arr.join('\n'));
+      lines.push('```');
+    }
+  }
+  return lines.join('\n');
+}
+
+function clipForUrl(text, limit) {
+  const note = '\n\n（内容过长已截断，完整内容请用「复制反馈内容」）';
+  let s = String(text || '');
+  if (encodeURIComponent(s).length <= limit) return s;
+  const budget = limit - encodeURIComponent(note).length;
+  while (s.length > 60 && encodeURIComponent(s).length > budget) {
+    s = s.slice(0, Math.floor(s.length * 0.85));
+  }
+  return s + note;
+}
+
+function mailtoUrl(text) {
+  return 'mailto:' + FEEDBACK_MAIL +
+    '?subject=' + encodeURIComponent('代码解释器反馈：' + fbKind) +
+    '&body=' + encodeURIComponent(clipForUrl(text, FB_URL_LIMIT));
+}
+
+function issueUrl(text) {
+  return 'https://github.com/' + FEEDBACK_REPO + '/issues/new' +
+    '?title=' + encodeURIComponent('反馈：' + fbKind) +
+    '&body=' + encodeURIComponent(clipForUrl(text, FB_URL_LIMIT)) +
+    '&labels=' + encodeURIComponent('feedback');
+}
+
+function renderFbDiag() {
+  const withCode = $('fbWithCode').checked;
+  $('fbDiag').textContent = '将带上：版本 ' + APP_VERSION + ' · ' + (nativePlatform ? 'app' : 'pwa') +
+    ' · 识别 ' + (lastResult ? langLabel(lastResult.lang) : '还没解释') +
+    ' · ' + (withCode ? '代码前 ' + FB_CODE_LINES + ' 行' : '不含代码');
+}
+
+let fbDraftTimer = null;
+function queueFbDraft() {
+  clearTimeout(fbDraftTimer);
+  fbDraftTimer = setTimeout(() => LS.set('ce.fb.draft', $('fbText').value), 400);
+}
+
+async function openFeedback() {
+  closeSheets();
+  $('fbText').value = LS.get('ce.fb.draft', '');
+  $('fbWithCode').checked = false;
+  document.querySelectorAll('#fbKinds .fb-kind').forEach(b => b.classList.toggle('active', b.dataset.kind === fbKind));
+  renderFbDiag();
+  openSheet('sheetFeedback');
+  const feed = await getFeed();
+  const hasIssues = !!(feed && feed.feedback && feed.feedback.issues === true);
+  $('fbIssue').hidden = !hasIssues;
+  if (!feed) $('fbDiag').textContent += '　（离线：GitHub 按钮需要联网，复制/邮件照常）';
 }
 
 /* ---------- 事件绑定 ---------- */
@@ -2581,6 +2836,43 @@ $('miAbout').addEventListener('click', () => {
 $('aiSave').addEventListener('click', saveSettings);
 $('aiClear').addEventListener('click', () => { LS.del('ce.aikey'); $('aiKey').value = ''; toast('Key 已清掉'); });
 $('aiClearCache').addEventListener('click', () => { LS.del('ce.aicache'); toast('AI 缓存已清'); });
+$('miUpdate').addEventListener('click', async () => {
+  closeSheets();
+  const feed = await checkUpdate(false);
+  if (feed) applyUpdate(feed);
+});
+$('miFeedback').addEventListener('click', openFeedback);
+$('fbKinds').addEventListener('click', e => {
+  const b = e.target.closest('[data-kind]');
+  if (!b) return;
+  fbKind = b.dataset.kind;
+  document.querySelectorAll('#fbKinds .fb-kind').forEach(x => x.classList.toggle('active', x === b));
+});
+$('fbText').addEventListener('input', queueFbDraft);
+$('fbWithCode').addEventListener('change', renderFbDiag);
+$('fbCopy').addEventListener('click', async () => {
+  const text = buildFeedbackText({
+    kind: fbKind,
+    text: $('fbText').value,
+    withCode: $('fbWithCode').checked
+  });
+  if (!text) return;
+  if (await copyText(text)) toast('已复制，贴到 QQ/邮件/issue 都行', 2600);
+  else toast('复制不了：长按下面的文字手动选', 3200);
+});
+$('fbMail').addEventListener('click', () => {
+  openExternal(mailtoUrl(buildFeedbackText({ kind: fbKind, text: $('fbText').value, withCode: $('fbWithCode').checked })));
+  toast('已交给邮件 App；没反应就用「复制反馈内容」', 3000);
+});
+$('fbIssue').addEventListener('click', () => {
+  openExternal(issueUrl(buildFeedbackText({ kind: fbKind, text: $('fbText').value, withCode: $('fbWithCode').checked })));
+  toast('在浏览器里打开 GitHub；要登录才有权限提交', 3000);
+});
+$('fbClear').addEventListener('click', () => {
+  $('fbText').value = '';
+  LS.del('ce.fb.draft');
+  toast('已清空');
+});
 $('code').addEventListener('input', () => { syncGutter(); queueSave(); });
 $('code').addEventListener('scroll', syncGutter);
 $('code').addEventListener('keydown', e => {
@@ -2632,7 +2924,7 @@ if (nativePlatform) {
 }
 
 /* ---------- 启动 ---------- */
-const APP_VERSION = '1.1.0';
+const APP_VERSION = '1.2.0';
 // 原生壳里 MainActivity 已经把状态栏/手势条的高度让出来了，CSS 就不要再叠 env()，
 // 否则顶栏会多出一整条空白。
 if (nativePlatform) document.body.classList.add('is-native');
@@ -2644,6 +2936,9 @@ if ($('code').value.trim()) doExplain(true);
 refreshAIUI();
 setView('code');
 $('verText').textContent = '版本 ' + APP_VERSION + ' · ' + (nativePlatform ? 'app' : 'pwa');
+
+/* 静默查更新：挪到首屏之后，失败不吭声（getFeed 内部吞异常） */
+setTimeout(() => { checkUpdate(true).catch(() => {}); }, 2500);
 
 /* 桌面/主屏快捷方式：?paste=1 进来就直接读剪贴板 */
 if (/[?&]paste=1(&|$)/.test(location.search)) {

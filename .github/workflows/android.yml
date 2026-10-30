@@ -67,10 +67,19 @@ jobs:
         env:
           SECRET_KS_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
 
+      # 版本语义由 index.html 里的 APP_VERSION 决定，CI 只读不猜；
+      # 安装包的 versionName 跟着它走（升级靠 versionCode = run_number）
+      - name: Read app version
+        run: |
+          set -e
+          APP_VERSION=$(node -e "const fs=require('fs');const t=fs.readFileSync('index.html','utf8');const m=/APP_VERSION = '([^']+)'/.exec(t);if(!m){console.error('APP_VERSION not found');process.exit(1)}console.log(m[1])")
+          echo "APP_VERSION=$APP_VERSION" >> "$GITHUB_ENV"
+          echo "app version: $APP_VERSION"
+
       - name: Build release APK
         working-directory: app/android
         env:
-          APP_VERSION_NAME: ${{ github.run_number }}.0
+          APP_VERSION_NAME: ${{ env.APP_VERSION }}
           APP_VERSION_CODE: ${{ github.run_number }}
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD != '' && secrets.KEYSTORE_PASSWORD || 'codeexplainer' }}
           KEY_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD != '' && secrets.KEYSTORE_PASSWORD || 'codeexplainer' }}
@@ -92,17 +101,35 @@ jobs:
       - name: Rename APK
         run: cp "$APK" "code-explainer-app-${{ github.run_number }}.apk"
 
+      # 更新检查的「真值」文件：App 启动时拿它比版本。
+      # feedback.issues 用仓库当前的 Issues 开关，关着时 App 就不显示「去 GitHub 提 issue」
+      - name: Write version.json
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          HAS_ISSUES=$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}" \
+            | jq -r '.has_issues // false' 2>/dev/null || true)
+          if [ "$HAS_ISSUES" != "true" ]; then HAS_ISSUES=false; fi
+          export HAS_ISSUES
+          export NOTES="$(git log -1 --pretty=%s | head -c 200)"
+          node -e 'const fs=require("fs");const d={version:process.env.APP_VERSION,build:Number(process.env.GITHUB_RUN_NUMBER),apk:"apk/code-explainer.apk",notes:process.env.NOTES||"",feedback:{issues:process.env.HAS_ISSUES==="true",repo:process.env.GITHUB_REPOSITORY}};fs.writeFileSync("version.json",JSON.stringify(d,null,2)+"\n");'
+          cat version.json
+
       - name: Publish release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="v${{ github.run_number }}"
           gh release create "$TAG" "code-explainer-app-${{ github.run_number }}.apk" \
-            --title "代码解释器 app v${{ github.run_number }}" \
+            --title "代码解释器 app v${{ env.APP_VERSION }}" \
             --notes "手机点下面的 APK 直接装（首次要允许「安装未知应用」）。离线可用；AI 通道要自己在设置里填 DeepSeek key。" \
             --latest
 
       # 手机上从 Release 下可能被墙，同一份 APK 再放到 Pages 上（主站在 l3j3y3.github.io，国内通常能开）
+      # version.json 也一起提交，App 的「检查更新」读的就是它
       - name: Publish APK to Pages
         run: |
           set -e
@@ -110,6 +137,6 @@ jobs:
           cp "code-explainer-app-${{ github.run_number }}.apk" apk/code-explainer.apk
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -f apk/code-explainer.apk
-          git commit -m "ci: publish apk build ${{ github.run_number }}" || echo "nothing to commit"
+          git add -f apk/code-explainer.apk version.json
+          git commit -m "ci: publish apk build ${{ github.run_number }} (v${{ env.APP_VERSION }})" || echo "nothing to commit"
           git push origin HEAD:main
