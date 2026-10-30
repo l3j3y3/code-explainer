@@ -46,13 +46,22 @@ app/android/        原生工程；签名说明见 app/android/app/README-signin
 
 `targetSdk 36` 之后，Android 15/16 强制 edge-to-edge：状态栏变透明、盖在 WebView 上面。
 这时 `@capacitor/status-bar` 的 `setOverlaysWebView(false)` 和 `setBackgroundColor` 在 API > 35
-都是空操作（见它的 `shouldSetStatusBarColor()`），WebView 里 `env(safe-area-inset-top)` 也是 0
-——顶栏控件会被状态栏压住、点不到。
+都是空操作（见它的 `shouldSetStatusBarColor()`）；而且**WebView 的 `env(safe-area-inset-*)` 只报
+display cutout、从不报系统栏**，无挖孔的机器上恒为 0 —— 顶栏控件会被状态栏压住、点不到。
 
-修法在 `app/android/app/src/main/java/com/l3j3y3/codeexplainer/MainActivity.java`：
-API >= 35 时给 WebView 装 `ViewCompat.setOnApplyWindowInsetsListener`，把
-`systemBars | displayCutout` 的尺寸作为 padding 让出来；**不要装到 `android.R.id.content` 上**，
-Capacitor Keyboard 插件已经占了那个 listener。Web 侧在 `body.is-native` 时不再叠 `env()`。
+**给 WebView 加 padding 不管用**（v1.1 踩过）：Chromium 用整个 surface 渲染，padding 不移动内容。
+所以现在的做法是「原生推数据、CSS 让位」：
+
+- `MainActivity.java`：API >= 35 时装 `ViewCompat.setOnApplyWindowInsetsListener`，把
+  `systemBars | displayCutout` 除以 density 换算成 CSS px，用 `evaluateJavascript` 写成
+  `documentElement` 的行内 `--safe-area-top/bottom/left/right`；页面重建后靠 layout 监听 +
+  `requestApplyInsets` 补推。**不要装到 `android.R.id.content` 上**，Capacitor Keyboard 已经占了那个 listener。
+- `index.html`：`:root` 用 `env(...)` 给这四个变量兜底，`.appbar / .tabbar / .sheet / .toast`
+  一律消费 `var(--safe-area-*)`，**不要直接用 `env()`**（那就绕开 Android 那条修法了）。
+- 排查：⋯ → 关于 会显示「安全区 26/0」这类读数；是 `0px/0px` 就说明原生没推成功。
+
+参考实现：agaric 的 [PR #4303](https://github.com/jfolcini/agaric/pull/4303)、fusion 用的
+[`@capacitor-community/safe-area`](https://github.com/Runfusion/Fusion/commit/91c99dd93efaca9fde5f357b95ffb366fd33ffd9)。
 
 ## 改完怎么更新
 
@@ -60,7 +69,7 @@ Capacitor Keyboard 插件已经占了那个 listener。Web 侧在 `body.is-nativ
 
 1. 改 `index.html` 里的 `APP_VERSION`（例如 `1.2.0` → `1.3.0`）——它是 App 版本、APK 的 versionName、
    以及 CI 写进 `version.json` 的 `version` 的唯一来源。
-2. 把 `sw.js` 里的 `CACHE` 加一（`code-explainer-v4` → `v5`），PWA 才会换掉旧缓存。
+2. 把 `sw.js` 里的 `CACHE` 加一（`code-explainer-v5` → `v6`），PWA 才会换掉旧缓存。
 3. `git push` 到 main：Pages 一两分钟更新；同时 CI 出 `vN` 包，Release 与 `apk/code-explainer.apk`、
    `version.json` 一起更新。手机重装覆盖即可，设置不丢。
 

@@ -22,6 +22,13 @@
     --com: #6a9955; --num: #b5cea8; --op: #d4d4d4; --tag: #569cd6; --attr: #9cdcfe;
     --shadow: 0 1px 3px rgba(0,0,0,.06);
     --mono: Consolas, "Cascadia Code", "JetBrains Mono", ui-monospace, monospace;
+    /* 安全区内边距统一走变量：浏览器/PWA 落到 env() 兜底，
+       Android 壳由 MainActivity 把 systemBars|displayCutout 写进行内样式覆盖它
+       （WebView 的 env() 只报挖孔、不报系统栏，单靠 env() 是拿不到状态栏高度的） */
+    --safe-area-top: env(safe-area-inset-top, 0px);
+    --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+    --safe-area-left: env(safe-area-inset-left, 0px);
+    --safe-area-right: env(safe-area-inset-right, 0px);
   }
   @media (prefers-color-scheme: dark) {
     :root {
@@ -49,13 +56,10 @@
 
   .appbar {
     flex: 0 0 auto; display: flex; flex-direction: column; gap: 6px;
-    padding: calc(6px + env(safe-area-inset-top)) 12px 6px;
+    padding: calc(6px + var(--safe-area-top)) calc(12px + var(--safe-area-right)) 6px calc(12px + var(--safe-area-left));
     background: var(--panel); border-bottom: 1px solid var(--border);
     position: relative; z-index: 6;
   }
-  /* 原生壳（Android 15+）由 MainActivity 把系统栏的高度让出来，这里再叠一次 env 就会多出空白 */
-  body.is-native .appbar { padding-top: 6px; }
-  body.is-native .tabbar { padding-bottom: 0; }
   .appbar .bar-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
   .appbar .bar-lang { gap: 6px; }
   .appbar .bar-lang select.chip { flex: 1 1 auto; max-width: none; min-width: 0; }
@@ -123,7 +127,7 @@
   /* ============ 底部导航 ============ */
   .tabbar {
     flex: 0 0 auto; display: flex; background: var(--panel); border-top: 1px solid var(--border);
-    padding-bottom: env(safe-area-inset-bottom); position: relative; z-index: 6;
+    padding-bottom: var(--safe-area-bottom); position: relative; z-index: 6;
   }
   .tabbar button {
     flex: 1 1 0; display: flex; flex-direction: column; align-items: center; gap: 2px;
@@ -257,7 +261,7 @@
   .sheet {
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 21;
     background: var(--panel); border-radius: 16px 16px 0 0;
-    padding: 14px 14px calc(14px + env(safe-area-inset-bottom));
+    padding: 14px 14px calc(14px + var(--safe-area-bottom));
     max-height: 86vh; overflow-y: auto; box-shadow: 0 -8px 28px rgba(0,0,0,.25);
   }
   .sheet h3 { margin: 0 0 8px; font-size: 15px; }
@@ -306,7 +310,7 @@
   }
   .menu-item:last-child { border-bottom: 0; }
   .toast {
-    position: fixed; left: 50%; bottom: calc(88px + env(safe-area-inset-bottom)); transform: translateX(-50%);
+    position: fixed; left: 50%; bottom: calc(88px + var(--safe-area-bottom)); transform: translateX(-50%);
     background: rgba(28,28,30,.94); color: #fff; font-size: 13px; padding: 8px 14px;
     border-radius: 18px; opacity: 0; transition: opacity .18s; pointer-events: none; z-index: 40;
     max-width: 84vw; text-align: center;
@@ -1803,6 +1807,15 @@ function hash32(s) {
   for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = (h * 0x01000193) >>> 0; }
   return h.toString(36);
 }
+// 排查用：当前生效的安全区（Android 壳由 MainActivity 推，网页里是 env() 兜底）
+function insetsText() {
+  const cs = getComputedStyle(document.documentElement);
+  const read = n => {
+    const v = (cs.getPropertyValue(n) || '').trim();
+    return v || '0px';
+  };
+  return read('--safe-area-top') + '/' + read('--safe-area-bottom');
+}
 
 /* ---------- 状态 ---------- */
 let lastResult = null;
@@ -2497,7 +2510,7 @@ function openSettings() {
   $('aiBase').value = LS.get('ce.aibase', '') || '';
   $('aiModel').value = AI.model();
   updateUsageText();
-  $('verText').textContent = '版本 ' + APP_VERSION + ' · pwa';
+  $('verText').textContent = '版本 ' + APP_VERSION + ' · ' + (nativePlatform ? 'app' : 'pwa') + ' · 安全区 ' + insetsText();
   openSheet('sheetSettings');
 }
 function saveSettings() {
@@ -2831,7 +2844,7 @@ $('miClear').addEventListener('click', () => {
 $('miSettings').addEventListener('click', openSettings);
 $('miAbout').addEventListener('click', () => {
   closeSheets();
-  toast('代码解释器 ' + APP_VERSION + ' · 离线词典 + DeepSeek AI', 3000);
+  toast('代码解释器 ' + APP_VERSION + ' · ' + (nativePlatform ? 'app' : 'pwa') + ' · 安全区 ' + insetsText(), 3600);
 });
 $('aiSave').addEventListener('click', saveSettings);
 $('aiClear').addEventListener('click', () => { LS.del('ce.aikey'); $('aiKey').value = ''; toast('Key 已清掉'); });
@@ -2924,9 +2937,10 @@ if (nativePlatform) {
 }
 
 /* ---------- 启动 ---------- */
-const APP_VERSION = '1.2.0';
-// 原生壳里 MainActivity 已经把状态栏/手势条的高度让出来了，CSS 就不要再叠 env()，
-// 否则顶栏会多出一整条空白。
+const APP_VERSION = '1.2.1';
+// 安全区由 CSS 变量 --safe-area-* 统一消费：浏览器里是 env() 兜底，
+// Android 壳里由 MainActivity 把系统栏尺寸写进行内样式（见那边注释）。
+// 这个 class 只留给诊断/样式钩子用，不再靠它压掉内边距。
 if (nativePlatform) document.body.classList.add('is-native');
 $('lang').value = LS.get('ce.lang', 'auto');
 const savedCode = LS.get('ce.code', '');
@@ -2935,7 +2949,7 @@ syncGutter();
 if ($('code').value.trim()) doExplain(true);
 refreshAIUI();
 setView('code');
-$('verText').textContent = '版本 ' + APP_VERSION + ' · ' + (nativePlatform ? 'app' : 'pwa');
+$('verText').textContent = '版本 ' + APP_VERSION + ' · ' + (nativePlatform ? 'app' : 'pwa') + ' · 安全区 ' + insetsText();
 
 /* 静默查更新：挪到首屏之后，失败不吭声（getFeed 内部吞异常） */
 setTimeout(() => { checkUpdate(true).catch(() => {}); }, 2500);
