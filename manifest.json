@@ -1,14 +1,24 @@
 {
+  "id": "/code-explainer/",
   "name": "代码解释器",
   "short_name": "代码解释器",
-  "description": "贴一段代码，自动识别语言并逐行解释，关键字附中文含义。",
+  "description": "贴一段代码，自动识别语言并逐行中文解释；离线词典 + AI 详解。",
   "lang": "zh-CN",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
-  "orientation": "portrait",
+  "display_override": ["standalone", "minimal-ui"],
   "background_color": "#f5f6f8",
   "theme_color": "#2563eb",
+  "categories": ["education", "developer", "productivity"],
+  "shortcuts": [
+    {
+      "name": "粘贴并解释",
+      "short_name": "粘贴解释",
+      "url": "./?paste=1",
+      "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    }
+  ],
   "icons": [
     { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
     { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },

@@ -2,9 +2,12 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content">
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" content="#2563eb">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="代码解释器">
 <title>代码解释器</title>
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icons/icon-192.png">
@@ -17,6 +20,7 @@
     --kw: #569cd6; --bi: #dcdcaa; --ty: #4ec9b0; --str: #ce9178;
     --com: #6a9955; --num: #b5cea8; --op: #d4d4d4; --tag: #569cd6; --attr: #9cdcfe;
     --shadow: 0 1px 3px rgba(0,0,0,.06);
+    --mono: Consolas, "Cascadia Code", "JetBrains Mono", ui-monospace, monospace;
   }
   @media (prefers-color-scheme: dark) {
     :root {
@@ -25,79 +29,118 @@
       --code-bg: #0d1117; --code-text: #d4d4d4; --shadow: 0 1px 3px rgba(0,0,0,.4);
     }
   }
-  * { box-sizing: border-box; }
-  .muted { color: var(--muted); }
-  html, body { margin: 0; padding: 0; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  [hidden] { display: none !important; }
+  html, body { margin: 0; padding: 0; height: 100%; }
   body {
     background: var(--bg); color: var(--text);
-    font-family: "Microsoft YaHei UI", "PingFang SC", system-ui, -apple-system, sans-serif;
+    font-family: "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
     font-size: 15px; line-height: 1.6;
-    padding-bottom: env(safe-area-inset-bottom);
+    overscroll-behavior: none;
+    -webkit-text-size-adjust: 100%;
   }
-  header {
-    position: sticky; top: 0; z-index: 10;
-    background: var(--panel); border-bottom: 1px solid var(--border);
-    padding: 10px 14px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-  }
-  header h1 { font-size: 17px; margin: 0; font-weight: 700; letter-spacing: .5px; }
-  header h1 .badge {
-    font-size: 11px; font-weight: 500; color: var(--accent); background: var(--accent-soft);
-    border-radius: 6px; padding: 1px 6px; margin-left: 4px; vertical-align: 2px;
-  }
-  .toolbar { display: flex; gap: 8px; align-items: center; margin-left: auto; flex-wrap: wrap; }
-  select, button {
-    font: inherit; font-size: 14px; border-radius: 8px; border: 1px solid var(--border);
-    background: var(--panel); color: var(--text); padding: 7px 12px; cursor: pointer;
-    min-height: 40px;
-  }
-  select { padding-right: 26px; }
-  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
-  button.primary:active { filter: brightness(.92); }
-  button.ghost { background: transparent; }
-  main {
-    display: grid; grid-template-columns: 1fr; gap: 12px;
-    padding: 12px; max-width: 1500px; margin: 0 auto;
-  }
-  @media (min-width: 900px) {
-    main { grid-template-columns: 1fr 1fr; align-items: start; }
-    .input-pane { position: sticky; top: 66px; }
-  }
-  .pane {
-    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
-    box-shadow: var(--shadow); overflow: hidden; display: flex; flex-direction: column;
-    min-height: 0; min-width: 0;
-  }
-  .pane-title {
-    display: flex; align-items: center; gap: 8px;
-    padding: 9px 12px; font-size: 13px; font-weight: 600; color: var(--muted);
-    border-bottom: 1px solid var(--border);
-  }
-  .pane-title .muted { font-weight: 400; }
-  #code {
-    width: 100%; min-height: 36vh; border: 0; outline: 0; resize: vertical;
-    background: var(--code-bg); color: var(--code-text);
-    font-family: Consolas, "Cascadia Code", "JetBrains Mono", monospace;
-    font-size: 13.5px; line-height: 1.65; padding: 12px; tab-size: 4;
-    white-space: pre; overflow: auto;
-  }
-  @media (min-width: 900px) { #code { min-height: 62vh; } }
-  nav.tabs {
-    display: flex; gap: 4px; padding: 8px 10px 0; border-bottom: 1px solid var(--border);
-    background: var(--panel);
-  }
-  nav.tabs button {
-    border: 0; background: transparent; border-bottom: 2px solid transparent;
-    border-radius: 0; min-height: 40px; color: var(--muted); font-size: 14px;
-  }
-  nav.tabs button.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
-  .tab { display: none; padding: 12px; min-width: 0; }
-  .tab.active { display: block; }
-  .empty { color: var(--muted); text-align: center; padding: 28px 8px; font-size: 14px; }
+  button, select, input, textarea { font: inherit; color: inherit; }
+  button { cursor: pointer; }
 
-  .summary-card {
-    background: var(--accent-soft); border-radius: 10px; padding: 12px 14px; margin-bottom: 12px;
-    font-size: 14.5px;
+  /* ============ 外壳 ============ */
+  .app { display: flex; flex-direction: column; height: 100vh; height: 100dvh; height: var(--vvh, 100dvh); overflow: hidden; }
+
+  .appbar {
+    flex: 0 0 auto; display: flex; align-items: center; gap: 8px;
+    padding: calc(6px + env(safe-area-inset-top)) 12px 6px;
+    background: var(--panel); border-bottom: 1px solid var(--border);
+    position: relative; z-index: 6;
   }
+  .appbar .title {
+    font-size: 16px; font-weight: 700; letter-spacing: .3px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;
+  }
+  .appbar .spacer { flex: 1 1 auto; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 10px;
+    border-radius: 17px; border: 1px solid var(--border); background: var(--panel);
+    font-size: 13px; white-space: nowrap;
+  }
+  select.chip {
+    appearance: none; -webkit-appearance: none; padding-right: 26px; max-width: 128px;
+    background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+    background-position: calc(100% - 14px) 15px, calc(100% - 9px) 15px;
+    background-size: 5px 5px, 5px 5px; background-repeat: no-repeat;
+  }
+  .chip.ai { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+  .chip.ai.off { border-color: var(--border); color: var(--muted); font-weight: 400; }
+  .icon-btn {
+    width: 34px; height: 34px; flex: 0 0 auto; border-radius: 10px; border: 1px solid var(--border);
+    background: var(--panel); display: inline-flex; align-items: center; justify-content: center;
+    font-size: 17px; line-height: 1; padding: 0;
+  }
+
+  /* ============ 视图区 ============ */
+  .views { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; }
+  .view { position: absolute; inset: 0; display: none; flex-direction: column; min-height: 0; min-width: 0; }
+  .view.active { display: flex; }
+  #results { position: absolute; inset: 0; display: none; flex-direction: column; min-height: 0; }
+  #results.active { display: flex; }
+  #results .view { position: absolute; inset: 0; }
+  .scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch; padding: 12px; }
+
+  /* ============ 代码屏 ============ */
+  .editor-wrap { flex: 1 1 auto; display: flex; min-height: 0; background: var(--code-bg); }
+  .gutter {
+    flex: 0 0 auto; width: 44px; overflow: hidden; padding: 12px 8px 12px 4px;
+    text-align: right; color: #6e7681; font-family: var(--mono); font-size: 14px;
+    line-height: 1.6; white-space: pre; user-select: none;
+    border-right: 1px solid rgba(255,255,255,.08);
+  }
+  #code {
+    flex: 1 1 auto; min-width: 0; border: 0; outline: 0; resize: none;
+    background: var(--code-bg); color: var(--code-text);
+    font-family: var(--mono); font-size: 14px; line-height: 1.6;
+    padding: 12px; tab-size: 4; white-space: pre; overflow: auto;
+  }
+  #code::placeholder { color: #6e7681; }
+  .cta {
+    flex: 0 0 auto; display: flex; gap: 8px; padding: 8px 12px;
+    background: var(--panel); border-top: 1px solid var(--border);
+  }
+  .cta .btn { height: 46px; border-radius: 12px; font-size: 15px; }
+  .cta .btn.primary { flex: 1 1 auto; }
+
+  /* ============ 底部导航 ============ */
+  .tabbar {
+    flex: 0 0 auto; display: flex; background: var(--panel); border-top: 1px solid var(--border);
+    padding-bottom: env(safe-area-inset-bottom); position: relative; z-index: 6;
+  }
+  .tabbar button {
+    flex: 1 1 0; display: flex; flex-direction: column; align-items: center; gap: 2px;
+    padding: 7px 0 5px; border: 0; background: transparent; color: var(--muted); font-size: 11px;
+  }
+  .tabbar button.active { color: var(--accent); }
+  .tabbar svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+
+  /* ============ 通用按钮 ============ */
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    height: 38px; padding: 0 14px; border-radius: 10px;
+    border: 1px solid var(--border); background: var(--panel); font-size: 14px;
+  }
+  .btn:active { filter: brightness(.95); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  .btn.small { height: 32px; padding: 0 10px; font-size: 13px; border-radius: 8px; }
+  .btn[disabled] { opacity: .5; }
+
+  /* ============ 结果内容 ============ */
+  .filters {
+    flex: 0 0 auto; display: flex; gap: 8px; align-items: center; overflow-x: auto;
+    padding: 8px 12px; background: var(--panel); border-bottom: 1px solid var(--border);
+  }
+  .filters button {
+    height: 32px; padding: 0 12px; border-radius: 16px; white-space: nowrap;
+    border: 1px solid var(--border); background: transparent; color: var(--muted); font-size: 13px;
+  }
+  .filters button.active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+
+  .summary-card { background: var(--accent-soft); border-radius: 10px; padding: 12px 14px; margin-bottom: 12px; font-size: 14.5px; }
   .summary-card b { color: var(--accent); }
   h3.sec { font-size: 13px; color: var(--muted); font-weight: 600; margin: 16px 0 8px; letter-spacing: .5px; }
   ul.steps { margin: 0; padding-left: 22px; }
@@ -107,73 +150,150 @@
     display: flex; gap: 8px; align-items: baseline; padding: 7px 10px;
     border: 1px solid var(--border); border-radius: 8px; font-size: 14px;
   }
-  .func-item .ln { color: var(--muted); font-size: 12px; min-width: 40px; }
-  .func-item code { font-family: Consolas, monospace; color: var(--accent); }
+  .func-item .ln { color: var(--muted); font-size: 12px; min-width: 52px; flex: 0 0 auto; }
+  .func-item code { font-family: var(--mono); color: var(--accent); word-break: break-all; }
+  .muted { color: var(--muted); }
+  .empty { color: var(--muted); text-align: center; padding: 28px 8px; font-size: 14px; }
 
-  .line-card {
-    border: 1px solid var(--border); border-radius: 10px; margin-bottom: 8px; overflow: hidden;
-  }
+  .line-card { border: 1px solid var(--border); border-radius: 10px; margin-bottom: 8px; overflow: hidden; background: var(--panel); }
+  .line-card.sel { outline: 2px solid var(--accent); outline-offset: 1px; }
   .line-card .code-row {
-    display: flex; gap: 0; background: var(--code-bg); color: var(--code-text);
-    font-family: Consolas, "Cascadia Code", monospace; font-size: 13px; line-height: 1.7;
-    overflow-x: auto; white-space: pre;
+    display: flex; background: var(--code-bg); color: var(--code-text);
+    font-family: var(--mono); font-size: 13px; line-height: 1.7; overflow-x: auto; white-space: pre;
   }
   .line-card .lineno {
-    flex: 0 0 auto; width: 42px; text-align: right; padding: 6px 8px 6px 6px;
+    flex: 0 0 auto; width: 40px; text-align: right; padding: 6px 8px 6px 6px;
     color: #6e7681; user-select: none; border-right: 1px solid #333;
   }
   .line-card .code-body { padding: 6px 10px; }
-  .line-card .note {
-    padding: 7px 12px; font-size: 13.5px; border-top: 1px solid var(--border);
-    background: var(--panel); display: flex; gap: 8px; align-items: baseline;
-  }
+  .line-card .note { padding: 8px 12px; font-size: 13.5px; border-top: 1px solid var(--border); display: flex; gap: 8px; align-items: baseline; }
   .line-card .note .tag {
     flex: 0 0 auto; font-size: 11px; padding: 1px 6px; border-radius: 5px;
     background: var(--accent-soft); color: var(--accent); font-weight: 600;
   }
   .note .fallback { color: var(--muted); }
-  .tok-k { color: var(--kw); } .tok-kw { color: var(--kw); } .tok-bi { color: var(--bi); } .tok-ty { color: var(--ty); }
+
+  .tok-k, .tok-kw { color: var(--kw); } .tok-bi { color: var(--bi); } .tok-ty { color: var(--ty); }
   .tok-str { color: var(--str); } .tok-com { color: var(--com); font-style: italic; }
   .tok-num { color: var(--num); } .tok-op { color: var(--op); }
-  .tok-tag { color: var(--tag); } .tok-attr { color: var(--attr); }
-  .tok-prop { color: var(--attr); } .tok-sel { color: var(--kw); }
-  .tok-plain { color: var(--code-text); }
+  .tok-tag { color: var(--tag); } .tok-attr, .tok-prop { color: var(--attr); }
+  .tok-sel { color: var(--kw); } .tok-plain { color: var(--code-text); }
 
   .kw-list { display: flex; flex-direction: column; gap: 8px; }
-  .kw-item {
-    border: 1px solid var(--border); border-radius: 10px; padding: 9px 12px;
-    cursor: pointer; background: var(--panel);
-  }
+  .kw-item { border: 1px solid var(--border); border-radius: 10px; padding: 9px 12px; background: var(--panel); }
   .kw-item:active { background: var(--accent-soft); }
   .kw-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-  .kw-head code { font-family: Consolas, monospace; font-size: 14px; font-weight: 700; color: var(--accent); }
+  .kw-head code { font-family: var(--mono); font-size: 14px; font-weight: 700; color: var(--accent); word-break: break-all; }
   .kw-head .kind { font-size: 11px; color: var(--muted); border: 1px solid var(--border); border-radius: 5px; padding: 0 5px; }
+  .kw-head .zh { font-size: 14px; }
   .kw-head .cnt { font-size: 12px; color: var(--muted); margin-left: auto; }
-  .kw-head .zh { font-size: 14px; color: var(--text); }
+  .kw-jump {
+    display: inline-flex; align-items: center; height: 24px; padding: 0 8px; margin: 2px 4px 2px 0;
+    border-radius: 12px; border: 1px solid var(--border); background: var(--bg);
+    font-size: 12px; color: var(--accent); font-family: var(--mono);
+  }
   .kw-body { display: none; margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border); }
   .kw-item.open .kw-body { display: block; }
   .kw-body p { margin: 4px 0; font-size: 13.5px; }
   .kw-body pre {
     background: var(--code-bg); color: var(--code-text); border-radius: 8px; padding: 8px 10px;
-    font-family: Consolas, monospace; font-size: 12.5px; overflow-x: auto; margin: 6px 0;
+    font-family: var(--mono); font-size: 12.5px; overflow-x: auto; margin: 6px 0; white-space: pre;
   }
   .kw-body a { color: var(--accent); font-size: 13px; }
   .kw-miss { color: var(--muted); font-size: 13px; }
-  @media (max-width: 600px) {
-    header { padding: 8px 10px; flex-direction: column; align-items: stretch; gap: 8px; }
-    header h1 { font-size: 16px; }
-    .toolbar { margin-left: 0; }
-    .toolbar select { flex: 1 1 100%; }
-    .toolbar button { flex: 1 1 0; }
-    .summary-card { padding: 10px 12px; }
+
+  /* ============ AI ============ */
+  .ai-block { margin-top: 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); overflow: hidden; }
+  .ai-head { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+  .ai-head b { font-size: 13px; color: var(--accent); }
+  .ai-head .spacer { flex: 1; }
+  .ai-out { padding: 10px 12px; font-size: 14.5px; white-space: pre-wrap; word-break: break-word; }
+  .ai-out:empty { display: none; }
+  .ai-note { padding: 8px 12px; color: var(--muted); font-size: 13px; }
+  .ai-err { color: #d1242f; }
+  .ai-cursor { color: var(--accent); animation: blink 1s steps(2, start) infinite; }
+  @keyframes blink { to { visibility: hidden; } }
+  .ai-actions { display: flex; gap: 8px; flex-wrap: wrap; padding: 0 12px 10px; }
+  .ai-chat { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px 0; }
+  .ai-msg { font-size: 14px; padding: 8px 10px; border-radius: 10px; white-space: pre-wrap; word-break: break-word; }
+  .ai-msg.me { background: var(--accent-soft); align-self: flex-end; max-width: 88%; }
+  .ai-msg.ai { background: var(--bg); border: 1px solid var(--border); align-self: flex-start; max-width: 92%; }
+  .ask-row { display: flex; gap: 8px; padding: 10px 12px 12px; }
+  .ask-row input {
+    flex: 1 1 auto; min-width: 0; height: 40px; padding: 0 12px; border-radius: 10px;
+    border: 1px solid var(--border); background: var(--bg); font-size: 14px;
+  }
+
+  /* ============ 抽屉 / 遮罩 ============ */
+  .mask { position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 20; }
+  .sheet {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 21;
+    background: var(--panel); border-radius: 16px 16px 0 0;
+    padding: 14px 14px calc(14px + env(safe-area-inset-bottom));
+    max-height: 86vh; overflow-y: auto; box-shadow: 0 -8px 28px rgba(0,0,0,.25);
+  }
+  .sheet h3 { margin: 0 0 8px; font-size: 15px; }
+  .sheet .hint { color: var(--muted); font-size: 12.5px; margin: 4px 0 12px; }
+  .field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+  .field label { font-size: 12.5px; color: var(--muted); }
+  .field input, .field select {
+    height: 42px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--border);
+    background: var(--bg); font-size: 14px; width: 100%;
+  }
+  .switch-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 0; margin-bottom: 6px; }
+  .switch-row span { font-size: 14px; }
+  .switch-row input { width: 20px; height: 20px; }
+  .sheet-actions { display: flex; gap: 8px; margin-top: 6px; }
+  .sheet-actions .btn { flex: 1 1 auto; }
+  .menu-item {
+    display: block; width: 100%; text-align: left; padding: 13px 4px;
+    border: 0; border-bottom: 1px solid var(--border); background: transparent; font-size: 15px;
+  }
+  .menu-item:last-child { border-bottom: 0; }
+  .toast {
+    position: fixed; left: 50%; bottom: calc(88px + env(safe-area-inset-bottom)); transform: translateX(-50%);
+    background: rgba(28,28,30,.94); color: #fff; font-size: 13px; padding: 8px 14px;
+    border-radius: 18px; opacity: 0; transition: opacity .18s; pointer-events: none; z-index: 40;
+    max-width: 84vw; text-align: center;
+  }
+  .toast.show { opacity: 1; }
+
+  /* ============ 桌面 ============ */
+  .desktop-tabs { display: none; }
+  @media (min-width: 900px) {
+    .views { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; padding: 12px; }
+    #view-code {
+      position: static; display: flex; border: 1px solid var(--border); border-radius: 12px;
+      overflow: hidden; box-shadow: var(--shadow); background: var(--panel);
+    }
+    #results {
+      position: static; display: flex; border: 1px solid var(--border); border-radius: 12px;
+      overflow: hidden; box-shadow: var(--shadow); background: var(--panel);
+    }
+    #results .view { position: static; inset: auto; }
+    .tabbar { display: none; }
+    .cta { border-top: 1px solid var(--border); }
+    .desktop-tabs {
+      display: flex; gap: 4px; padding: 8px 10px 0; border-bottom: 1px solid var(--border);
+      background: var(--panel); flex: 0 0 auto;
+    }
+    .desktop-tabs button {
+      height: 36px; padding: 0 14px; border: 0; border-bottom: 2px solid transparent;
+      border-radius: 0; background: transparent; color: var(--muted); font-size: 14px;
+    }
+    .desktop-tabs button.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+    #code { font-size: 13.5px; }
+    .gutter { font-size: 13.5px; }
+    .toast { bottom: 32px; }
   }
 </style>
 </head>
 <body>
-<header>
-  <h1>代码解释器</h1>
-  <div class="toolbar">
-    <select id="lang" aria-label="语言">
+<div class="app">
+  <header class="appbar">
+    <div class="title" id="barTitle">代码解释器</div>
+    <div class="spacer"></div>
+    <select id="lang" class="chip" aria-label="语言">
       <option value="auto">自动识别</option>
       <option value="python">Python</option>
       <option value="c">C</option>
@@ -184,31 +304,116 @@
       <option value="html">HTML</option>
       <option value="css">CSS</option>
     </select>
-    <button id="btnExplain" class="primary">解释</button>
-    <button id="btnSample" class="ghost">示例</button>
-    <button id="btnClear" class="ghost">清空</button>
+    <button id="btnAiChip" class="chip ai off" aria-label="AI 通道">AI</button>
+    <button id="btnMore" class="icon-btn" aria-label="更多" aria-haspopup="menu">⋯</button>
+  </header>
+
+  <main class="views">
+    <section id="view-code" class="view active">
+      <div class="editor-wrap">
+        <div class="gutter" id="gutter" aria-hidden="true"></div>
+        <textarea id="code" spellcheck="false" autocapitalize="off" autocorrect="off" autocomplete="off"
+          placeholder="把代码粘进来，然后点下面的「解释」"></textarea>
+      </div>
+      <div class="cta">
+        <button id="btnPaste" class="btn">粘贴</button>
+        <button id="btnExplain" class="btn primary">解释</button>
+      </div>
+    </section>
+
+    <section id="results">
+      <nav class="desktop-tabs" id="resultTabs">
+        <button data-view="overall" class="active">整体</button>
+        <button data-view="lines">逐行</button>
+        <button data-view="words">词表</button>
+      </nav>
+
+      <section id="view-overall" class="view active">
+        <div class="scroll" id="overallScroll">
+          <div id="tab-overall"><div class="empty">点「解释」看这段代码在干什么。</div></div>
+          <div id="aiOverall"></div>
+        </div>
+      </section>
+
+      <section id="view-lines" class="view">
+        <div class="filters">
+          <button data-filter="all" class="active">全部</button>
+          <button data-filter="noted">只看有说明</button>
+          <button id="btnAiLines" class="btn small">AI 补全没讲的行</button>
+        </div>
+        <div class="scroll" id="linesScroll"><div id="tab-lines"><div class="empty">还没解释。</div></div></div>
+      </section>
+
+      <section id="view-words" class="view">
+        <div class="scroll" id="wordsScroll"><div id="tab-keywords"><div class="empty">还没解释。</div></div></div>
+      </section>
+    </section>
+  </main>
+
+  <nav class="tabbar" id="tabbar">
+    <button data-view="code" class="active" aria-label="代码">
+      <svg viewBox="0 0 24 24"><path d="M9 7l-5 5 5 5"/><path d="M15 7l5 5-5 5"/></svg>
+      <span>代码</span>
+    </button>
+    <button data-view="overall" aria-label="整体">
+      <svg viewBox="0 0 24 24"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h10"/></svg>
+      <span>整体</span>
+    </button>
+    <button data-view="lines" aria-label="逐行">
+      <svg viewBox="0 0 24 24"><path d="M9 7h11"/><path d="M9 12h11"/><path d="M9 17h11"/><path d="M4 7h.01"/><path d="M4 12h.01"/><path d="M4 17h.01"/></svg>
+      <span>逐行</span>
+    </button>
+    <button data-view="words" aria-label="词表">
+      <svg viewBox="0 0 24 24"><path d="M20 12.5l-7.5 7.5L3 10.5V3h7.5z"/><circle cx="7.5" cy="7.5" r="1.3"/></svg>
+      <span>词表</span>
+    </button>
+  </nav>
+</div>
+
+<div class="mask" id="mask" hidden></div>
+
+<div class="sheet" id="sheetMore" hidden>
+  <button class="menu-item" id="miPaste">粘贴剪贴板</button>
+  <button class="menu-item" id="miCopy">复制代码</button>
+  <button class="menu-item" id="miClear">清空代码</button>
+  <button class="menu-item" id="miSettings">设置 / AI 通道</button>
+  <button class="menu-item" id="miAbout">关于</button>
+</div>
+
+<div class="sheet" id="sheetSettings" hidden>
+  <h3>设置</h3>
+  <label class="switch-row">
+    <span>启用 AI 通道</span>
+    <input type="checkbox" id="aiOn">
+  </label>
+  <p class="hint">开启后，代码会发送到 DeepSeek 的服务器做讲解。关掉就是纯离线解释，一个字都不上传。</p>
+  <div class="field">
+    <label>API Key（只存在这台设备上）</label>
+    <input id="aiKey" type="password" placeholder="sk-…" autocomplete="off" spellcheck="false">
   </div>
-</header>
-<main>
-  <section class="pane input-pane">
-    <div class="pane-title">代码 <span id="detectInfo" class="muted"></span></div>
-    <textarea id="code" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="在这里粘贴或输入代码……"></textarea>
-  </section>
-  <section class="pane output-pane">
-    <nav class="tabs">
-      <button data-tab="overall" class="active">整体</button>
-      <button data-tab="lines">逐行</button>
-      <button data-tab="keywords">关键字</button>
-    </nav>
-    <div id="tab-overall" class="tab active"><div class="empty">点上面的「解释」，或者先贴一段代码。</div></div>
-    <div id="tab-lines" class="tab"><div class="empty">还没解释。</div></div>
-    <div id="tab-keywords" class="tab"><div class="empty">还没解释。</div></div>
-  </section>
-</main>
+  <div class="field">
+    <label>接口地址</label>
+    <input id="aiBase" placeholder="https://api.deepseek.com" autocomplete="off" spellcheck="false">
+  </div>
+  <div class="field">
+    <label>模型</label>
+    <select id="aiModel">
+      <option value="deepseek-flash">deepseek-flash（快、便宜）</option>
+      <option value="deepseek-v4-pro">deepseek-v4-pro（讲得更细，更贵）</option>
+    </select>
+  </div>
+  <p class="hint" id="aiUsage"></p>
+  <div class="sheet-actions">
+    <button class="btn" id="aiClear">清掉 Key</button>
+    <button class="btn" id="aiClearCache">清 AI 缓存</button>
+    <button class="btn primary" id="aiSave">保存</button>
+  </div>
+  <p class="hint" id="verText"></p>
+</div>
+
+<div class="toast" id="toast"></div>
+
 <script>
-window.addEventListener('error', function (e) {
-  document.title = 'DEMO-ERR: ' + (e.message || e.error || '') + ' @line ' + (e.lineno || '');
-});
 /* ================= 词典 ================= */
 const DICT = {
 common: {
@@ -1145,64 +1350,113 @@ function lookup(term, langId) {
 }
 
 /* ================= UI ================= */
+const $ = id => document.getElementById(id);
+const LS = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : v; } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} },
+  del(k) { try { localStorage.removeItem(k); } catch (e) {} }
+};
+
+/* ---------- 小工具 ---------- */
 function escapeHtml(s) {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
-
 function renderTokens(tokens) {
   return tokens.map(([t, v]) => '<span class="tok-' + t + '">' + escapeHtml(v) + '</span>').join('');
 }
+let toastTimer = null;
+function toast(msg, ms) {
+  const el = $('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), ms || 2200);
+}
+function hash32(s) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = (h * 0x01000193) >>> 0; }
+  return h.toString(36);
+}
 
-const SAMPLE = [
-  '# 判断一个数是不是偶数',
-  'def is_even(n):',
-  '    if n % 2 == 0:',
-  '        return True',
-  '    else:',
-  '        return False',
-  '',
-  'def main():',
-  '    num = int(input("请输入一个整数："))',
-  '    if is_even(num):',
-  '        print(num, "是偶数")',
-  '    else:',
-  '        print(num, "是奇数")',
-  '',
-  'if __name__ == "__main__":',
-  '    main()'
-].join('\n');
-
-const $ = id => document.getElementById(id);
+/* ---------- 状态 ---------- */
 let lastResult = null;
+let currentView = 'code';
+let currentResultView = 'overall';
+let lineFilter = 'all';
+let aiRun = null;
+let gutterCount = -1;
+const nativePlatform = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+const TAG_LABEL_AI = Object.assign({}, typeof TAG_LABEL !== 'undefined' ? TAG_LABEL : {}, { ai: 'AI' });
 
+/* ---------- 视图切换 ---------- */
+function setView(name) {
+  if (name !== 'code') currentResultView = name;
+  currentView = name;
+  const isCode = name === 'code';
+  $('view-code').classList.toggle('active', isCode);
+  $('results').classList.toggle('active', !isCode);
+  ['overall', 'lines', 'words'].forEach(v => $('view-' + v).classList.toggle('active', v === currentResultView));
+  document.querySelectorAll('#tabbar button').forEach(b => b.classList.toggle('active', b.dataset.view === name));
+  document.querySelectorAll('#resultTabs button').forEach(b => b.classList.toggle('active', b.dataset.view === currentResultView));
+  $('barTitle').textContent = isCode ? '代码解释器' : (name === 'overall' ? '整体' : name === 'lines' ? '逐行' : '词表');
+  if (!isCode) {
+    const sc = name === 'overall' ? $('overallScroll') : name === 'lines' ? $('linesScroll') : $('wordsScroll');
+    if (sc) sc.scrollTop = 0;
+  } else {
+    syncGutter();
+  }
+}
+
+/* ---------- 编辑器 ---------- */
+function syncGutter() {
+  const code = $('code');
+  const g = $('gutter');
+  const n = code.value.split('\n').length;
+  if (n !== gutterCount) {
+    gutterCount = n;
+    let s = '';
+    for (let i = 1; i <= n; i++) s += i + '\n';
+    g.textContent = s;
+  }
+  g.scrollTop = code.scrollTop;
+  g.scrollLeft = code.scrollLeft;
+}
+function saveCode() {
+  LS.set('ce.code', $('code').value);
+  LS.set('ce.lang', $('lang').value);
+}
+let saveTimer = null;
+function queueSave() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(saveCode, 400);
+}
+
+/* ---------- 解释 ---------- */
 function currentLang(code) {
   const sel = $('lang').value;
   if (sel !== 'auto') return sel;
   return detectLanguage(code);
 }
-
 function doExplain() {
   const code = $('code').value;
   if (!code.trim()) {
     lastResult = null;
-    $('detectInfo').textContent = '';
-    $('tab-overall').innerHTML = '<div class="empty">代码是空的，先贴一段进来。</div>';
+    $('tab-overall').innerHTML = '<div class="empty">代码是空的，先粘一段进来。</div>';
     $('tab-lines').innerHTML = '<div class="empty">还没解释。</div>';
     $('tab-keywords').innerHTML = '<div class="empty">还没解释。</div>';
     return;
   }
   const auto = $('lang').value === 'auto';
   const langId = currentLang(code);
-  $('detectInfo').textContent = '识别为 ' + langLabel(langId) + '（' + (auto ? '自动' : '手动指定') + '）';
-  const res = analyze(code, langId);
-  lastResult = res;
-  renderAll(res, auto);
+  lastResult = analyze(code, langId);
+  lastResult.autoLang = auto;
+  renderAll(lastResult);
 }
-
-function renderAll(res, auto) {
+function renderAll(res) {
   renderOverall(res);
   renderLines(res);
   renderKeywords(res);
+  refreshAIUI();
 }
 
 function renderOverall(res) {
@@ -1210,7 +1464,7 @@ function renderOverall(res) {
   html.push('<div class="summary-card">' + escapeHtml(res.summary) + '</div>');
   if (res.steps.length) {
     html.push('<h3 class="sec">主要步骤</h3><ol class="steps">');
-    res.steps.forEach((s, i) => { html.push('<li>' + escapeHtml(s) + '</li>'); });
+    res.steps.forEach(s => html.push('<li>' + escapeHtml(s) + '</li>'));
     html.push('</ol>');
   }
   const defs = [];
@@ -1223,50 +1477,66 @@ function renderOverall(res) {
     });
     html.push('</div>');
   }
-  html.push('<p class="muted" style="font-size:12.5px;margin-top:14px">共 ' + res.stats.total + ' 行 · 有效 ' + res.stats.code + ' 行 · 空行 ' + res.stats.blank + ' 行</p>');
+  html.push('<p class="muted" style="font-size:12.5px;margin:14px 0 0">' + langLabel(res.lang) +
+    (res.autoLang ? '（自动识别）' : '（手动指定）') + ' · 共 ' + res.stats.total + ' 行 · 有效 ' + res.stats.code + ' 行 · 空行 ' + res.stats.blank + ' 行</p>');
   $('tab-overall').innerHTML = html.join('');
 }
 
+function lineIsNoted(n) {
+  return !!(n && n.note && n.tag !== 'blank' && !n.fallback);
+}
 function renderLines(res) {
   const html = [];
+  let shown = 0;
   res.tokenLines.forEach((ts, idx) => {
     const n = res.lineNotes[idx];
-    const note = n.note;
-    html.push('<div class="line-card">');
+    if (lineFilter === 'noted' && !lineIsNoted(n)) return;
+    shown++;
+    html.push('<div class="line-card" data-line="' + (idx + 1) + '">');
     html.push('<div class="code-row"><span class="lineno">' + (idx + 1) + '</span><span class="code-body">' + renderTokens(ts) + '</span></div>');
     if (n.tag === 'blank') {
       html.push('<div class="note"><span class="tag">空行</span><span class="fallback">（空行，用来分段）</span></div>');
-    } else if (note) {
-      html.push('<div class="note"><span class="tag">' + (TAG_LABEL[n.tag] || '说明') + '</span><span' + (n.fallback ? ' class="fallback"' : '') + '>' + escapeHtml(note) + '</span></div>');
+    } else if (n.note) {
+      html.push('<div class="note"><span class="tag">' + escapeHtml(TAG_LABEL_AI[n.tag] || '说明') + '</span><span' + (n.fallback ? ' class="fallback"' : '') + '>' + escapeHtml(n.note) + '</span></div>');
     }
     html.push('</div>');
   });
+  if (!shown) html.push('<div class="empty">没有符合筛选的行。</div>');
   $('tab-lines').innerHTML = html.join('');
 }
 
 function renderKeywords(res) {
-  const html = [];
   if (!res.keywords.length) {
     $('tab-keywords').innerHTML = '<div class="empty">这段代码里没有可识别的关键字。</div>';
     return;
   }
+  const html = [];
   html.push('<p class="muted" style="font-size:12.5px;margin:0 0 10px">共 ' + res.keywords.length + ' 个词，点开看含义。</p>');
   html.push('<div class="kw-list">');
   res.keywords.forEach(k => {
     const info = lookup(k.term, res.lang);
-    html.push('<div class="kw-item">');
-    html.push('<div class="kw-head"><code>' + escapeHtml(k.term) + '</code><span class="kind">' + k.kind + '</span>');
-    if (info) html.push('<span class="zh">' + escapeHtml(info.zh) + '</span>');
-    else html.push('<span class="zh kw-miss">（词典未收录）</span>');
-    html.push('<span class="cnt">×' + k.count + ' · 第 ' + k.lines.slice(0, 6).join(',') + (k.lines.length > 6 ? '…' : '') + ' 行</span></div>');
+    html.push('<div class="kw-item" data-term="' + escapeHtml(k.term) + '">');
+    html.push('<div class="kw-head"><code>' + escapeHtml(k.term) + '</code><span class="kind">' + escapeHtml(k.kind) + '</span>');
+    html.push(info ? '<span class="zh">' + escapeHtml(info.zh) + '</span>' : '<span class="zh kw-miss">（词典未收录）</span>');
+    html.push('<span class="cnt">×' + k.count + '</span></div>');
+    html.push('<div style="margin-top:4px">');
+    k.lines.slice(0, 6).forEach(ln => {
+      html.push('<button class="kw-jump" data-jump="' + ln + '">第 ' + ln + ' 行</button>');
+    });
+    if (k.lines.length > 6) html.push('<span class="muted" style="font-size:12px">…</span>');
+    html.push('</div>');
     html.push('<div class="kw-body">');
     if (info) {
       html.push('<p>' + escapeHtml(info.d) + '</p>');
       if (info.ex) html.push('<pre>' + escapeHtml(info.ex) + '</pre>');
       html.push('<p><a href="' + escapeHtml(info.doc || docUrl(res.lang, k.term)) + '" target="_blank" rel="noopener">查官方文档</a></p>');
+    } else if (AI.ready()) {
+      html.push('<p class="kw-miss">离线词典没有这个词。可以让 AI 讲讲它在这段代码里干什么。</p>');
+      html.push('<p><button class="btn small" data-ai-word="' + escapeHtml(k.term) + '">AI 问一句</button></p>');
     } else {
       html.push('<p class="kw-miss">离线词典暂时没有这个词的解释。</p>');
     }
+    html.push('<div class="kw-ai-out"></div>');
     html.push('</div></div>');
   });
   html.push('</div>');
@@ -1278,35 +1548,597 @@ function docUrl(langId, term) {
   return d.doc || 'https://www.bing.com/search?q=' + encodeURIComponent(langLabel(langId) + ' ' + term);
 }
 
-// 事件绑定
-document.querySelectorAll('nav.tabs button').forEach(btn => {
+function jumpToLine(ln) {
+  if (lineFilter !== 'all') {
+    lineFilter = 'all';
+    document.querySelectorAll('.filters button[data-filter]').forEach(b => b.classList.toggle('active', b.dataset.filter === 'all'));
+    if (lastResult) renderLines(lastResult);
+  }
+  setView('lines');
+  const card = document.querySelector('.line-card[data-line="' + ln + '"]');
+  if (!card) { toast('第 ' + ln + ' 行当前不可见'); return; }
+  card.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  card.classList.add('sel');
+  setTimeout(() => card.classList.remove('sel'), 1400);
+}
+
+/* ---------- AI 通道 ---------- */
+const AI = {
+  on: () => LS.get('ce.aion', '0') === '1',
+  key: () => LS.get('ce.aikey', ''),
+  base: () => (LS.get('ce.aibase', '') || 'https://api.deepseek.com').replace(/\/+$/, ''),
+  model: () => LS.get('ce.aimodel', 'deepseek-flash'),
+  ready() { return this.on() && !!this.key(); }
+};
+const AI_USAGE = {
+  get total() { return parseInt(LS.get('ce.aitok', '0'), 10) || 0; },
+  session: 0,
+  add(u) {
+    const t = (u && u.total_tokens) || 0;
+    this.session += t;
+    LS.set('ce.aitok', String(this.total + t));
+    updateUsageText();
+  }
+};
+function updateUsageText() {
+  const el = $('aiUsage');
+  if (!el) return;
+  el.textContent = '本次已用 ' + AI_USAGE.session + ' tokens · 累计 ' + AI_USAGE.total + ' tokens';
+}
+function aiCacheAll() {
+  try { return JSON.parse(LS.get('ce.aicache', '{}')) || {}; } catch (e) { return {}; }
+}
+function aiCacheKey(kind, code, extra) {
+  return kind + '|' + AI.model() + '|' + hash32(code + '\u0000' + (extra || ''));
+}
+function aiCacheGet(kind, code, extra) {
+  const all = aiCacheAll();
+  return all[aiCacheKey(kind, code, extra)] || '';
+}
+function aiCacheSet(kind, code, extra, text) {
+  const all = aiCacheAll();
+  all[aiCacheKey(kind, code, extra)] = text;
+  const keys = Object.keys(all);
+  while (keys.length > 24) delete all[keys.shift()];
+  LS.set('ce.aicache', JSON.stringify(all));
+}
+
+class AIError extends Error {}
+
+async function aiErrorText(resp) {
+  let detail = '';
+  try {
+    const j = await resp.json();
+    detail = (j && j.error && (j.error.message || j.error.code)) || '';
+  } catch (e) {}
+  const map = {
+    400: '请求有问题（可能是代码太长或格式不对）',
+    401: 'Key 无效或已被撤销',
+    402: '余额不足',
+    403: '没有权限',
+    404: '接口地址不对',
+    422: '请求参数不对',
+    429: '太频繁了，等一下再试',
+    500: '服务器出错了',
+    503: '服务器忙'
+  };
+  const base = map[resp.status] || ('请求失败 ' + resp.status);
+  return base + (detail ? '：' + detail : '');
+}
+
+async function readSSE(resp, onDelta) {
+  const reader = resp.body.getReader();
+  const dec = new TextDecoder();
+  let buf = '', out = '';
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let idx;
+    while ((idx = buf.indexOf('\n\n')) >= 0) {
+      const chunk = buf.slice(0, idx);
+      buf = buf.slice(idx + 2);
+      for (const line of chunk.split('\n')) {
+        if (line.slice(0, 5) !== 'data:') continue;
+        const payload = line.slice(5).trim();
+        if (!payload || payload === '[DONE]') continue;
+        let j;
+        try { j = JSON.parse(payload); } catch (e) { continue; }
+        if (j.usage) AI_USAGE.add(j.usage);
+        const d = j.choices && j.choices[0] && j.choices[0].delta;
+        if (d && d.content) {
+          out += d.content;
+          if (onDelta) onDelta(out);
+        }
+      }
+    }
+  }
+  return out;
+}
+
+async function aiChat(opts) {
+  const key = AI.key();
+  if (!key) throw new AIError('还没填 API Key：右上「⋯」→ 设置 / AI 通道');
+  const body = {
+    model: AI.model(),
+    messages: opts.messages,
+    max_tokens: opts.maxTokens || 800,
+    temperature: opts.temperature === undefined ? 0.3 : opts.temperature,
+    stream: !!opts.stream
+  };
+  if (opts.json) body.response_format = { type: 'json_object' };
+  if (opts.stream) body.stream_options = { include_usage: true };
+  // 实测（2026-10-30）：thinking:disabled 在流式与非流式下都被接受，关掉思考省时省钱
+  body.thinking = { type: 'disabled' };
+  let resp;
+  try {
+    resp = await fetch(AI.base() + '/chat/completions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer ' + key },
+      body: JSON.stringify(body),
+      signal: opts.signal
+    });
+  } catch (e) {
+    if (e && e.name === 'AbortError') throw e;
+    throw new AIError('网络不通，先看看 Wi-Fi；离线解释照旧能用');
+  }
+  if (!resp.ok) throw new AIError(await aiErrorText(resp));
+  if (!opts.stream) {
+    const j = await resp.json();
+    if (j.usage) AI_USAGE.add(j.usage);
+    const m = j.choices && j.choices[0] && j.choices[0].message;
+    return (m && m.content) || '';
+  }
+  return readSSE(resp, opts.onDelta);
+}
+
+function stopAI() {
+  if (aiRun) {
+    try { aiRun.abort(); } catch (e) {}
+    aiRun = null;
+  }
+}
+function newAbort() {
+  stopAI();
+  const c = new AbortController();
+  aiRun = c;
+  return c;
+}
+
+/* 提示词 */
+function sysBase() {
+  return '你是一名耐心的中文编程老师，面向刚学编程的新手。只用简体中文回答，不用 Markdown 标题和表格，不要反问，不要编造行号。';
+}
+
+/* 1) 整体 AI 详解 */
+function ensureAiOverall() {
+  const host = $('aiOverall');
+  if (host.dataset.built) return;
+  host.dataset.built = '1';
+  host.innerHTML =
+    '<div class="ai-block">' +
+      '<div class="ai-head"><b>AI 详解</b><span class="spacer"></span>' +
+        '<button class="btn small" id="aiRun">开始</button>' +
+        '<button class="btn small" id="aiStop" hidden>停止</button>' +
+      '</div>' +
+      '<div class="ai-out" id="aiOut"></div>' +
+      '<div class="ai-note" id="aiNote">用 DeepSeek 现场讲一遍，比离线规则更懂语义。</div>' +
+      '<div class="ai-chat" id="aiChat"></div>' +
+      '<div class="ask-row"><input id="askInput" placeholder="追问一句：这段代码有什么坑？" autocomplete="off"><button class="btn primary small" id="askSend">问</button></div>' +
+    '</div>';
+  $('aiRun').addEventListener('click', runOverallAI);
+  $('aiStop').addEventListener('click', () => { stopAI(); $('aiStop').hidden = true; $('aiRun').disabled = false; });
+  $('askSend').addEventListener('click', sendAsk);
+  $('askInput').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); sendAsk(); } });
+}
+
+async function runOverallAI() {
+  if (!AI.ready()) { openSettings(); return; }
+  const code = $('code').value.trim();
+  if (!code) { toast('先粘代码'); setView('code'); return; }
+  ensureAiOverall();
+  const out = $('aiOut');
+  const note = $('aiNote');
+  const runBtn = $('aiRun');
+  const cached = aiCacheGet('overall', code, '');
+  $('aiStop').hidden = true;
+  if (cached) {
+    out.textContent = cached;
+    note.textContent = '这一段是之前算过、直接读的缓存，没有再花钱。';
+    runBtn.textContent = '重新生成';
+    return;
+  }
+  const ctrl = newAbort();
+  runBtn.disabled = true;
+  $('aiStop').hidden = false;
+  note.textContent = '正在生成…';
+  note.classList.remove('ai-err');
+  out.textContent = '';
+  out.innerHTML = '<span class="ai-cursor">●</span>';
+  let text = '';
+  try {
+    text = await aiChat({
+      stream: true,
+      maxTokens: 900,
+      signal: ctrl.signal,
+      messages: [
+        { role: 'system', content: sysBase() },
+        { role: 'user', content: '语言：' + langLabel(currentLang(code)) + '\n代码：\n```\n' + code + '\n```\n请说明：1) 这段代码整体做什么；2) 关键步骤按执行顺序；3) 最容易出错或最值得注意的地方。分三段，短句，200 到 350 字。' }
+      ],
+      onDelta: all => { out.textContent = all; }
+    });
+    out.textContent = text || '（模型这次没返回内容，点「重新生成」再试一次）';
+    if (text) aiCacheSet('overall', code, '', text);
+    note.textContent = '';
+    runBtn.textContent = '重新生成';
+  } catch (e) {
+    if (e && e.name === 'AbortError') {
+      out.textContent = (text || '') + '\n\n（已停止）';
+      note.textContent = '已停止，已经出来的部分留着。';
+    } else {
+      out.textContent = text || '';
+      note.textContent = (e && e.message) || '出错了';
+      note.classList.add('ai-err');
+    }
+  } finally {
+    aiRun = null;
+    runBtn.disabled = false;
+    $('aiStop').hidden = true;
+  }
+}
+
+/* 2) 逐行 AI 补全 */
+function missingLines(res) {
+  const out = [];
+  res.lineTexts.forEach((t, i) => {
+    if (!t.trim()) return;
+    const n = res.lineNotes[i];
+    if (!n || n.fallback || !n.note) out.push(i + 1);
+  });
+  return out;
+}
+function stripFence(s) {
+  let t = String(s || '').trim();
+  if (t.startsWith('```')) t = t.replace(/^```[a-zA-Z]*\s*/, '').replace(/```\s*$/, '');
+  return t.trim();
+}
+async function runLinesAI() {
+  if (!AI.ready()) { openSettings(); return; }
+  const res = lastResult;
+  if (!res) { toast('先点「解释」'); return; }
+  const code = $('code').value.trim();
+  const todo = missingLines(res);
+  if (!todo.length) { toast('每一行都已经有说明了'); return; }
+  const cacheKeyExtra = todo.join(',');
+  const btn = $('btnAiLines');
+  const cached = aiCacheGet('lines', code, cacheKeyExtra);
+  if (cached) { applyAiLines(cached, res); toast('读到缓存，没花钱'); return; }
+  btn.disabled = true;
+  btn.textContent = 'AI 补全中…';
+  try {
+    const list = todo.map(n => n + ': ' + res.lineTexts[n - 1]).join('\n');
+    const text = await aiChat({
+      json: true,
+      maxTokens: Math.min(2000, 200 + todo.length * 40),
+      messages: [
+        { role: 'system', content: sysBase() + '这次必须只输出一个 JSON 对象，形如 {"lines":[{"line":3,"note":"给变量 x 赋初值"}]}，不许有别的文字。' },
+        { role: 'user', content: '语言：' + langLabel(res.lang) + '\n下面是需要解释的行（行号: 代码）：\n' + list + '\n请给每一行一条不超过 30 个汉字的中文说明，只解释这一行在做什么。' }
+      ]
+    });
+    applyAiLines(text, res);
+    aiCacheSet('lines', code, cacheKeyExtra, text);
+  } catch (e) {
+    toast((e && e.message) || 'AI 补全失败', 3200);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'AI 补全没讲的行';
+  }
+}
+function applyAiLines(text, res) {
+  let data = null;
+  try { data = JSON.parse(stripFence(text)); } catch (e) { data = null; }
+  if (!data || !Array.isArray(data.lines)) { toast('AI 返回的格式没看懂，再点一次试试', 3000); return; }
+  let n = 0;
+  data.lines.forEach(item => {
+    const ln = parseInt(item.line, 10);
+    const note = String(item.note || '').trim();
+    if (!ln || !note || ln < 1 || ln > res.lineNotes.length) return;
+    res.lineNotes[ln - 1] = { note: note, tag: 'ai' };
+    n++;
+  });
+  renderLines(res);
+  toast('AI 补了 ' + n + ' 行');
+}
+
+/* 3) 词条 AI 问一句 */
+async function runWordAI(term, cardEl) {
+  if (!AI.ready()) { openSettings(); return; }
+  const code = $('code').value.trim();
+  const outEl = cardEl.querySelector('.kw-ai-out');
+  const btn = cardEl.querySelector('[data-ai-word]');
+  const cached = aiCacheGet('word', code, term);
+  if (cached) { renderWordOut(outEl, cached); return; }
+  if (btn) { btn.disabled = true; btn.textContent = 'AI 想着…'; }
+  if (outEl) outEl.innerHTML = '<p class="muted" style="font-size:13px">AI 正在讲…</p>';
+  try {
+    const text = await aiChat({
+      stream: true,
+      maxTokens: 400,
+      messages: [
+        { role: 'system', content: sysBase() },
+        { role: 'user', content: '在下面这段 ' + langLabel(currentLang(code)) + ' 代码里，「' + term + '」这个词起什么作用？用两三句话说清，不超过 120 字。\n代码：\n```\n' + code + '\n```' }
+      ],
+      onDelta: all => { if (outEl) renderWordOut(outEl, all); }
+    });
+    renderWordOut(outEl, text);
+    if (text) aiCacheSet('word', code, term, text);
+  } catch (e) {
+    if (outEl) outEl.innerHTML = '<p class="ai-err" style="font-size:13px">' + escapeHtml((e && e.message) || '出错了') + '</p>';
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'AI 问一句'; }
+  }
+}
+function renderWordOut(el, text) {
+  if (!el) return;
+  el.innerHTML = '<p style="font-size:13.5px;margin:6px 0 0">' + escapeHtml(text) + '</p>';
+}
+
+/* 4) 追问 */
+let askHistory = [];
+async function sendAsk() {
+  if (!AI.ready()) { openSettings(); return; }
+  const input = $('askInput');
+  const q = input.value.trim();
+  if (!q) return;
+  const code = $('code').value.trim();
+  if (!code) { toast('先粘代码'); return; }
+  input.value = '';
+  const chat = $('aiChat');
+  const me = document.createElement('div');
+  me.className = 'ai-msg me';
+  me.textContent = q;
+  chat.appendChild(me);
+  const bubble = document.createElement('div');
+  bubble.className = 'ai-msg ai';
+  bubble.textContent = '…';
+  chat.appendChild(bubble);
+  chat.scrollTop = chat.scrollHeight;
+  const ctrl = newAbort();
+  try {
+    const msgs = [{ role: 'system', content: sysBase() + '回答要短，围绕这段代码，最多 4 句话。' }]
+      .concat([{ role: 'user', content: '代码（' + langLabel(currentLang(code)) + '）：\n```\n' + code + '\n```' }])
+      .concat(askHistory.slice(-6))
+      .concat([{ role: 'user', content: q }]);
+    const text = await aiChat({
+      stream: true,
+      maxTokens: 500,
+      signal: ctrl.signal,
+      messages: msgs,
+      onDelta: all => { bubble.textContent = all; chat.scrollTop = chat.scrollHeight; }
+    });
+    bubble.textContent = text || '（没返回内容）';
+    askHistory.push({ role: 'user', content: q }, { role: 'assistant', content: text });
+    if (askHistory.length > 12) askHistory = askHistory.slice(-12);
+  } catch (e) {
+    if (e && e.name === 'AbortError') bubble.textContent = '（已停止）';
+    else bubble.textContent = (e && e.message) || '出错了';
+  } finally {
+    aiRun = null;
+  }
+}
+
+/* ---------- AI 界面开关 ---------- */
+function refreshAIUI() {
+  const ready = AI.ready();
+  $('btnAiChip').classList.toggle('off', !ready);
+  $('btnAiChip').title = ready ? 'AI 已开启' : 'AI 未开启';
+  $('aiOverall').hidden = !ready;
+  $('btnAiLines').hidden = !ready;
+  if (ready) ensureAiOverall();
+  if (lastResult) renderKeywords(lastResult);
+  updateUsageText();
+}
+
+/* ---------- 抽屉 ---------- */
+function openSheet(id) {
+  $('mask').hidden = false;
+  $(id).hidden = false;
+}
+function closeSheets() {
+  $('mask').hidden = true;
+  ['sheetMore', 'sheetSettings'].forEach(id => { $(id).hidden = true; });
+}
+function openSettings() {
+  closeSheets();
+  $('aiOn').checked = AI.on();
+  $('aiKey').value = AI.key();
+  $('aiBase').value = LS.get('ce.aibase', '') || '';
+  $('aiModel').value = AI.model();
+  updateUsageText();
+  $('verText').textContent = '版本 ' + APP_VERSION + ' · pwa';
+  openSheet('sheetSettings');
+}
+function saveSettings() {
+  LS.set('ce.aion', $('aiOn').checked ? '1' : '0');
+  LS.set('ce.aikey', $('aiKey').value.trim());
+  LS.set('ce.aibase', $('aiBase').value.trim());
+  LS.set('ce.aimodel', $('aiModel').value || 'deepseek-flash');
+  closeSheets();
+  refreshAIUI();
+  toast(AI.ready() ? 'AI 已开启' : (AI.on() ? '开了 AI，但还没填 Key' : 'AI 已关闭，纯离线'));
+}
+
+/* ---------- 剪贴板 ---------- */
+async function readClipboard() {
+  try {
+    if (navigator.clipboard && navigator.clipboard.readText) {
+      const t = await navigator.clipboard.readText();
+      if (t) return t;
+    }
+  } catch (e) {}
+  try {
+    const C = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Clipboard;
+    if (C && C.read) {
+      const r = await C.read();
+      if (r && r.value) return r.value;
+    }
+  } catch (e) {}
+  return '';
+}
+async function pasteIntoCode() {
+  const t = await readClipboard();
+  const codeEl = $('code');
+  if (!t) {
+    codeEl.focus();
+    toast('读不到剪贴板：长按输入框手动粘贴');
+    return;
+  }
+  codeEl.value = t;
+  saveCode();
+  syncGutter();
+  doExplain();
+  toast('已粘贴 ' + t.split('\n').length + ' 行');
+}
+async function copyCode() {
+  const t = $('code').value;
+  if (!t) { toast('没代码可复制'); return; }
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) { await navigator.clipboard.writeText(t); }
+    else {
+      const C = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Clipboard;
+      if (C && C.write) await C.write({ string: t });
+      else throw new Error('no clipboard');
+    }
+    toast('已复制');
+  } catch (e) {
+    toast('复制不了，长按输入框全选手动复制');
+  }
+}
+
+/* ---------- 事件绑定 ---------- */
+document.querySelectorAll('#tabbar button').forEach(btn => {
+  btn.addEventListener('click', () => setView(btn.dataset.view));
+});
+document.querySelectorAll('#resultTabs button').forEach(btn => {
+  btn.addEventListener('click', () => setView(btn.dataset.view));
+});
+document.querySelectorAll('.filters button[data-filter]').forEach(btn => {
   btn.addEventListener('click', () => {
-    document.querySelectorAll('nav.tabs button').forEach(b => b.classList.remove('active'));
-    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-    btn.classList.add('active');
-    document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+    lineFilter = btn.dataset.filter;
+    document.querySelectorAll('.filters button[data-filter]').forEach(b => b.classList.toggle('active', b === btn));
+    if (lastResult) renderLines(lastResult);
   });
 });
-$('btnExplain').addEventListener('click', doExplain);
-$('btnSample').addEventListener('click', () => { $('code').value = SAMPLE; doExplain(); });
-$('btnClear').addEventListener('click', () => { $('code').value = ''; doExplain(); });
-$('lang').addEventListener('change', () => { if ($('code').value.trim()) doExplain(); });
+$('btnExplain').addEventListener('click', () => { saveCode(); doExplain(); setView('overall'); });
+$('btnPaste').addEventListener('click', pasteIntoCode);
+$('btnAiLines').addEventListener('click', runLinesAI);
+$('btnAiChip').addEventListener('click', () => {
+  if (AI.ready()) { setView('overall'); ensureAiOverall(); }
+  else openSettings();
+});
+$('btnMore').addEventListener('click', () => openSheet('sheetMore'));
+$('mask').addEventListener('click', closeSheets);
+$('miPaste').addEventListener('click', () => { closeSheets(); pasteIntoCode(); });
+$('miCopy').addEventListener('click', () => { closeSheets(); copyCode(); });
+$('miClear').addEventListener('click', () => {
+  closeSheets();
+  $('code').value = '';
+  LS.del('ce.code');
+  lastResult = null;
+  gutterCount = -1;
+  syncGutter();
+  doExplain();
+  askHistory = [];
+  if ($('aiChat')) $('aiChat').innerHTML = '';
+  if ($('aiOut')) $('aiOut').textContent = '';
+  toast('已清空');
+});
+$('miSettings').addEventListener('click', openSettings);
+$('miAbout').addEventListener('click', () => {
+  closeSheets();
+  toast('代码解释器 ' + APP_VERSION + ' · 离线词典 + DeepSeek AI', 3000);
+});
+$('aiSave').addEventListener('click', saveSettings);
+$('aiClear').addEventListener('click', () => { LS.del('ce.aikey'); $('aiKey').value = ''; toast('Key 已清掉'); });
+$('aiClearCache').addEventListener('click', () => { LS.del('ce.aicache'); toast('AI 缓存已清'); });
+$('code').addEventListener('input', () => { syncGutter(); queueSave(); });
+$('code').addEventListener('scroll', syncGutter);
 $('code').addEventListener('keydown', e => {
-  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); doExplain(); }
+  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); saveCode(); doExplain(); setView('overall'); }
+});
+$('lang').addEventListener('change', () => { saveCode(); if ($('code').value.trim()) doExplain(); });
+$('tab-lines').addEventListener('click', e => {
+  const j = e.target.closest('[data-jump]');
+  if (!j) return;
+  e.stopPropagation();
+  jumpToLine(parseInt(j.dataset.jump, 10));
 });
 $('tab-keywords').addEventListener('click', e => {
+  const jump = e.target.closest('[data-jump]');
+  if (jump) { jumpToLine(parseInt(jump.dataset.jump, 10)); return; }
+  const aiBtn = e.target.closest('[data-ai-word]');
+  if (aiBtn) { runWordAI(aiBtn.dataset.aiWord, aiBtn.closest('.kw-item')); return; }
   const item = e.target.closest('.kw-item');
   if (item) item.classList.toggle('open');
 });
 
-// 启动
-$('code').value = SAMPLE;
-doExplain();
+/* ---------- 键盘 / 视口 ---------- */
+function fitViewport() {
+  if (!window.visualViewport) return;
+  document.documentElement.style.setProperty('--vvh', Math.round(window.visualViewport.height) + 'px');
+}
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', fitViewport);
+  window.visualViewport.addEventListener('scroll', fitViewport);
+  fitViewport();
+}
 
-// PWA：注册 Service Worker（只在 https / localhost 下生效，file:// 打开时静默跳过）
-if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
+/* ---------- 原生壳 ---------- */
+if (nativePlatform) {
+  const P = window.Capacitor.Plugins || {};
+  if (P.App && P.App.addListener) {
+    P.App.addListener('backButton', () => {
+      if (currentView !== 'code') setView('code');
+      else if (P.App.exitApp) P.App.exitApp();
+    });
+  }
+  if (P.StatusBar) {
+    const dark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    try {
+      P.StatusBar.setStyle({ style: dark ? 'DARK' : 'LIGHT' });
+      P.StatusBar.setBackgroundColor({ color: dark ? '#161b22' : '#ffffff' });
+    } catch (e) {}
+  }
+}
+
+/* ---------- 启动 ---------- */
+const APP_VERSION = '1.0.0';
+$('lang').value = LS.get('ce.lang', 'auto');
+const savedCode = LS.get('ce.code', '');
+if (savedCode) $('code').value = savedCode;
+syncGutter();
+if ($('code').value.trim()) doExplain();
+refreshAIUI();
+setView('code');
+$('verText').textContent = '版本 ' + APP_VERSION + ' · ' + (nativePlatform ? 'app' : 'pwa');
+
+/* 桌面/主屏快捷方式：?paste=1 进来就直接读剪贴板 */
+if (/[?&]paste=1(&|$)/.test(location.search)) {
+  try { history.replaceState(null, '', location.pathname + location.hash); } catch (e) {}
+  setTimeout(pasteIntoCode, 260);
+}
+
+/* Service Worker：原生壳里跳过（资源在 APK 里，走 SW 反而会卡住旧版本） */
+if (!nativePlatform && 'serviceWorker' in navigator &&
+    (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
   window.addEventListener('load', function () {
-    navigator.serviceWorker.register('sw.js').catch(function () {});
+    navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(function () {});
+    let reloaded = false;
+    navigator.serviceWorker.addEventListener('controllerchange', function () {
+      if (reloaded) return;
+      reloaded = true;
+      location.reload();
+    });
   });
 }
 </script>
