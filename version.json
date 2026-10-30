@@ -1,8 +1,8 @@
 {
-  "version": "1.2.0",
-  "build": 6,
+  "version": "1.2.1",
+  "build": 7,
   "apk": "apk/code-explainer.apk",
-  "notes": "feat: 反馈弹层 + 自动检查更新",
+  "notes": "fix(android): 安全区改成原生推 CSS 变量，顶栏不再被状态栏压住",
   "feedback": {
     "issues": false,
     "repo": "l3j3y3/code-explainer"
