@@ -1,0 +1,1314 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#2563eb">
+<title>代码解释器</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<style>
+  :root {
+    --bg: #f5f6f8; --panel: #ffffff; --text: #1f2328; --muted: #6b7280;
+    --border: #e3e6ea; --accent: #2563eb; --accent-soft: #e8f0fe;
+    --code-bg: #1e1e1e; --code-text: #d4d4d4;
+    --kw: #569cd6; --bi: #dcdcaa; --ty: #4ec9b0; --str: #ce9178;
+    --com: #6a9955; --num: #b5cea8; --op: #d4d4d4; --tag: #569cd6; --attr: #9cdcfe;
+    --shadow: 0 1px 3px rgba(0,0,0,.06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1117; --panel: #161b22; --text: #e6edf3; --muted: #8b949e;
+      --border: #30363d; --accent: #58a6ff; --accent-soft: #1f2d3d;
+      --code-bg: #0d1117; --code-text: #d4d4d4; --shadow: 0 1px 3px rgba(0,0,0,.4);
+    }
+  }
+  * { box-sizing: border-box; }
+  .muted { color: var(--muted); }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: "Microsoft YaHei UI", "PingFang SC", system-ui, -apple-system, sans-serif;
+    font-size: 15px; line-height: 1.6;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  header {
+    position: sticky; top: 0; z-index: 10;
+    background: var(--panel); border-bottom: 1px solid var(--border);
+    padding: 10px 14px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  }
+  header h1 { font-size: 17px; margin: 0; font-weight: 700; letter-spacing: .5px; }
+  header h1 .badge {
+    font-size: 11px; font-weight: 500; color: var(--accent); background: var(--accent-soft);
+    border-radius: 6px; padding: 1px 6px; margin-left: 4px; vertical-align: 2px;
+  }
+  .toolbar { display: flex; gap: 8px; align-items: center; margin-left: auto; flex-wrap: wrap; }
+  select, button {
+    font: inherit; font-size: 14px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--panel); color: var(--text); padding: 7px 12px; cursor: pointer;
+    min-height: 40px;
+  }
+  select { padding-right: 26px; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  button.primary:active { filter: brightness(.92); }
+  button.ghost { background: transparent; }
+  main {
+    display: grid; grid-template-columns: 1fr; gap: 12px;
+    padding: 12px; max-width: 1500px; margin: 0 auto;
+  }
+  @media (min-width: 900px) {
+    main { grid-template-columns: 1fr 1fr; align-items: start; }
+    .input-pane { position: sticky; top: 66px; }
+  }
+  .pane {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    box-shadow: var(--shadow); overflow: hidden; display: flex; flex-direction: column;
+    min-height: 0; min-width: 0;
+  }
+  .pane-title {
+    display: flex; align-items: center; gap: 8px;
+    padding: 9px 12px; font-size: 13px; font-weight: 600; color: var(--muted);
+    border-bottom: 1px solid var(--border);
+  }
+  .pane-title .muted { font-weight: 400; }
+  #code {
+    width: 100%; min-height: 36vh; border: 0; outline: 0; resize: vertical;
+    background: var(--code-bg); color: var(--code-text);
+    font-family: Consolas, "Cascadia Code", "JetBrains Mono", monospace;
+    font-size: 13.5px; line-height: 1.65; padding: 12px; tab-size: 4;
+    white-space: pre; overflow: auto;
+  }
+  @media (min-width: 900px) { #code { min-height: 62vh; } }
+  nav.tabs {
+    display: flex; gap: 4px; padding: 8px 10px 0; border-bottom: 1px solid var(--border);
+    background: var(--panel);
+  }
+  nav.tabs button {
+    border: 0; background: transparent; border-bottom: 2px solid transparent;
+    border-radius: 0; min-height: 40px; color: var(--muted); font-size: 14px;
+  }
+  nav.tabs button.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+  .tab { display: none; padding: 12px; min-width: 0; }
+  .tab.active { display: block; }
+  .empty { color: var(--muted); text-align: center; padding: 28px 8px; font-size: 14px; }
+
+  .summary-card {
+    background: var(--accent-soft); border-radius: 10px; padding: 12px 14px; margin-bottom: 12px;
+    font-size: 14.5px;
+  }
+  .summary-card b { color: var(--accent); }
+  h3.sec { font-size: 13px; color: var(--muted); font-weight: 600; margin: 16px 0 8px; letter-spacing: .5px; }
+  ul.steps { margin: 0; padding-left: 22px; }
+  ul.steps li { margin: 4px 0; }
+  .func-list { display: flex; flex-direction: column; gap: 6px; }
+  .func-item {
+    display: flex; gap: 8px; align-items: baseline; padding: 7px 10px;
+    border: 1px solid var(--border); border-radius: 8px; font-size: 14px;
+  }
+  .func-item .ln { color: var(--muted); font-size: 12px; min-width: 40px; }
+  .func-item code { font-family: Consolas, monospace; color: var(--accent); }
+
+  .line-card {
+    border: 1px solid var(--border); border-radius: 10px; margin-bottom: 8px; overflow: hidden;
+  }
+  .line-card .code-row {
+    display: flex; gap: 0; background: var(--code-bg); color: var(--code-text);
+    font-family: Consolas, "Cascadia Code", monospace; font-size: 13px; line-height: 1.7;
+    overflow-x: auto; white-space: pre;
+  }
+  .line-card .lineno {
+    flex: 0 0 auto; width: 42px; text-align: right; padding: 6px 8px 6px 6px;
+    color: #6e7681; user-select: none; border-right: 1px solid #333;
+  }
+  .line-card .code-body { padding: 6px 10px; }
+  .line-card .note {
+    padding: 7px 12px; font-size: 13.5px; border-top: 1px solid var(--border);
+    background: var(--panel); display: flex; gap: 8px; align-items: baseline;
+  }
+  .line-card .note .tag {
+    flex: 0 0 auto; font-size: 11px; padding: 1px 6px; border-radius: 5px;
+    background: var(--accent-soft); color: var(--accent); font-weight: 600;
+  }
+  .note .fallback { color: var(--muted); }
+  .tok-k { color: var(--kw); } .tok-kw { color: var(--kw); } .tok-bi { color: var(--bi); } .tok-ty { color: var(--ty); }
+  .tok-str { color: var(--str); } .tok-com { color: var(--com); font-style: italic; }
+  .tok-num { color: var(--num); } .tok-op { color: var(--op); }
+  .tok-tag { color: var(--tag); } .tok-attr { color: var(--attr); }
+  .tok-prop { color: var(--attr); } .tok-sel { color: var(--kw); }
+  .tok-plain { color: var(--code-text); }
+
+  .kw-list { display: flex; flex-direction: column; gap: 8px; }
+  .kw-item {
+    border: 1px solid var(--border); border-radius: 10px; padding: 9px 12px;
+    cursor: pointer; background: var(--panel);
+  }
+  .kw-item:active { background: var(--accent-soft); }
+  .kw-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .kw-head code { font-family: Consolas, monospace; font-size: 14px; font-weight: 700; color: var(--accent); }
+  .kw-head .kind { font-size: 11px; color: var(--muted); border: 1px solid var(--border); border-radius: 5px; padding: 0 5px; }
+  .kw-head .cnt { font-size: 12px; color: var(--muted); margin-left: auto; }
+  .kw-head .zh { font-size: 14px; color: var(--text); }
+  .kw-body { display: none; margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border); }
+  .kw-item.open .kw-body { display: block; }
+  .kw-body p { margin: 4px 0; font-size: 13.5px; }
+  .kw-body pre {
+    background: var(--code-bg); color: var(--code-text); border-radius: 8px; padding: 8px 10px;
+    font-family: Consolas, monospace; font-size: 12.5px; overflow-x: auto; margin: 6px 0;
+  }
+  .kw-body a { color: var(--accent); font-size: 13px; }
+  .kw-miss { color: var(--muted); font-size: 13px; }
+  @media (max-width: 600px) {
+    header { padding: 8px 10px; flex-direction: column; align-items: stretch; gap: 8px; }
+    header h1 { font-size: 16px; }
+    .toolbar { margin-left: 0; }
+    .toolbar select { flex: 1 1 100%; }
+    .toolbar button { flex: 1 1 0; }
+    .summary-card { padding: 10px 12px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>代码解释器</h1>
+  <div class="toolbar">
+    <select id="lang" aria-label="语言">
+      <option value="auto">自动识别</option>
+      <option value="python">Python</option>
+      <option value="c">C</option>
+      <option value="cpp">C++</option>
+      <option value="java">Java</option>
+      <option value="js">JavaScript</option>
+      <option value="sql">SQL</option>
+      <option value="html">HTML</option>
+      <option value="css">CSS</option>
+    </select>
+    <button id="btnExplain" class="primary">解释</button>
+    <button id="btnSample" class="ghost">示例</button>
+    <button id="btnClear" class="ghost">清空</button>
+  </div>
+</header>
+<main>
+  <section class="pane input-pane">
+    <div class="pane-title">代码 <span id="detectInfo" class="muted"></span></div>
+    <textarea id="code" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="在这里粘贴或输入代码……"></textarea>
+  </section>
+  <section class="pane output-pane">
+    <nav class="tabs">
+      <button data-tab="overall" class="active">整体</button>
+      <button data-tab="lines">逐行</button>
+      <button data-tab="keywords">关键字</button>
+    </nav>
+    <div id="tab-overall" class="tab active"><div class="empty">点上面的「解释」，或者先贴一段代码。</div></div>
+    <div id="tab-lines" class="tab"><div class="empty">还没解释。</div></div>
+    <div id="tab-keywords" class="tab"><div class="empty">还没解释。</div></div>
+  </section>
+</main>
+<script>
+window.addEventListener('error', function (e) {
+  document.title = 'DEMO-ERR: ' + (e.message || e.error || '') + ' @line ' + (e.lineno || '');
+});
+/* ================= 词典 ================= */
+const DICT = {
+common: {
+  'if': {zh:'如果', d:'条件判断：条件成立才执行跟着的代码块。', ex:'if x > 0:\n    print("正数")'},
+  'else': {zh:'否则', d:'和 if 搭配：上面的条件都不成立时走这里。', ex:'if x > 0:\n    print("正")\nelse:\n    print("负")'},
+  'for': {zh:'循环', d:'按次数或按集合里的元素重复执行。', ex:'for i in range(3):\n    print(i)'},
+  'while': {zh:'当……时循环', d:'条件为真就一直重复，条件变假才停。', ex:'while n > 0:\n    n -= 1'},
+  'return': {zh:'返回', d:'结束当前函数，把结果交回调用它的地方。', ex:'def add(a, b):\n    return a + b'},
+  'break': {zh:'跳出', d:'立刻结束当前这一层循环。', ex:'for i in range(10):\n    if i == 3:\n        break'},
+  'continue': {zh:'继续下一轮', d:'跳过本次循环剩下的代码，直接进入下一次。', ex:'for i in range(5):\n    if i % 2 == 0:\n        continue'},
+  'not': {zh:'非', d:'逻辑取反：真变假、假变真。', ex:'if not done:\n    print("还没完成")'},
+  'and': {zh:'并且', d:'两边都为真，整个条件才为真。', ex:'if a > 0 and b > 0:\n    print("都为正")'},
+  'or': {zh:'或者', d:'任意一边为真，整个条件就为真。', ex:'if a == 0 or b == 0:\n    print("有零")'},
+  'in': {zh:'在……里面', d:'判断某个值是否属于集合/字符串，也用于循环遍历。', ex:'if "a" in "cat":\n    print("包含")'},
+  'is': {zh:'是同一个对象', d:'判断两个变量是不是指向同一个对象（身份比较，比 == 更严格）。', ex:'if x is None:\n    print("空")'},
+  'null': {zh:'空值', d:'表示「没有值」的特殊值。', ex:'if (x == null) {}'},
+  'None': {zh:'空值', d:'Python 里表示「什么都没有」的唯一对象。', ex:'x = None'},
+  'true': {zh:'真', d:'布尔值的一种，条件成立。', ex:'ok = true'},
+  'false': {zh:'假', d:'布尔值的一种，条件不成立。', ex:'ok = false'},
+  '=': {zh:'赋值', d:'把右边的值放进左边的变量/位置。', ex:'x = 10'},
+  '==': {zh:'等于判断', d:'比较两边是否相等，结果是真或假。', ex:'if x == 10:'},
+  '!=': {zh:'不等于', d:'两边不相等时结果为真。', ex:'if x != 0:'},
+  '+': {zh:'加', d:'数值相加，字符串则拼接。', ex:'total = a + b'},
+  '-': {zh:'减', d:'数值相减，也用作取负。', ex:'diff = a - b'},
+  '*': {zh:'乘', d:'数值相乘；字符串乘以数字表示重复。', ex:'area = w * h'},
+  '/': {zh:'除', d:'相除，结果通常是小数。', ex:'avg = total / n'},
+  '%': {zh:'取余', d:'相除后剩下的余数。常用于判断能否整除。', ex:'if n % 2 == 0:'},
+  '>': {zh:'大于', d:'左边大于右边为真。', ex:'if age > 18:'},
+  '<': {zh:'小于', d:'左边小于右边为真。', ex:'if age < 18:'},
+  '>=': {zh:'大于等于', d:'左边不小于右边时为真。', ex:'if score >= 60:'},
+  '<=': {zh:'小于等于', d:'左边不大于右边时为真。', ex:'if score <= 100:'},
+  '+=': {zh:'累加', d:'x += 1 等价于 x = x + 1。', ex:'count += 1'},
+  '-=': {zh:'累减', d:'x -= 1 等价于 x = x - 1。', ex:'n -= 1'},
+  '//': {zh:'整除', d:'相除后只保留整数部分（向下取整）。', ex:'q = 7 // 2'},
+  '**': {zh:'乘方', d:'左边的数的右边次方。', ex:'sq = 2 ** 3'},
+  '&&': {zh:'并且', d:'两边都为真，结果才为真。', ex:'if (a > 0 && b > 0) {}'},
+  '||': {zh:'或者', d:'任意一边为真，结果就为真。', ex:'if (a == 0 || b == 0) {}'}
+},
+python: {
+  'def': {zh:'定义函数', d:'用 def 定义一个函数：函数名、参数列表，冒号后面跟函数体。', ex:'def greet(name):\n    print("你好，" + name)', doc:'https://docs.python.org/3/reference/compound_stmts.html#function-definitions'},
+  'class': {zh:'定义类', d:'定义一种对象类型，里面放属性和方法。', ex:'class Dog:\n    def __init__(self, name):\n        self.name = name', doc:'https://docs.python.org/3/tutorial/classes.html'},
+  'import': {zh:'导入模块', d:'把别的模块里的功能拿进来用。', ex:'import math\nprint(math.sqrt(9))', doc:'https://docs.python.org/3/reference/import.html'},
+  'from': {zh:'从某模块导入', d:'指定从哪个模块导入指定的名字。', ex:'from math import sqrt'},
+  'as': {zh:'起别名', d:'把导入的模块或打开的对象换个短名字用。', ex:'import numpy as np'},
+  'print': {zh:'打印输出', d:'把内容显示到屏幕上，多个参数用逗号隔开。', ex:'print("hello", 1 + 2)', doc:'https://docs.python.org/3/library/functions.html#print'},
+  'input': {zh:'读取输入', d:'暂停程序，等用户敲一行字，返回的是字符串。', ex:'name = input("你叫什么？")', doc:'https://docs.python.org/3/library/functions.html#input'},
+  'len': {zh:'求长度', d:'返回字符串、列表、字典等里面有多少个元素。', ex:'len("abc")  # 3'},
+  'range': {zh:'整数序列', d:'生成一串整数，常用于 for 循环计数。range(5) 是 0~4。', ex:'for i in range(1, 4):\n    print(i)', doc:'https://docs.python.org/3/library/functions.html#func-range'},
+  'int': {zh:'转整数', d:'把字符串或小数转成整数（小数直接截断）。', ex:'n = int("42")'},
+  'float': {zh:'转小数', d:'把字符串或整数转成浮点数。', ex:'x = float("3.14")'},
+  'str': {zh:'转字符串', d:'把别的类型转成文本形式。', ex:'s = str(123)'},
+  'list': {zh:'列表', d:'有序、可修改的一串元素，用方括号写。', ex:'nums = [1, 2, 3]'},
+  'dict': {zh:'字典', d:'键值对集合，按键查值。', ex:'d = {"name": "小明", "age": 18}'},
+  'tuple': {zh:'元组', d:'有序但不可修改的一串元素，用小括号写。', ex:'p = (3, 4)'},
+  'set': {zh:'集合', d:'不重复的元素集合，能去重、求交集并集。', ex:'s = {1, 2, 3}'},
+  'bool': {zh:'布尔值', d:'只有真/假两种取值。', ex:'ok = bool(1)'},
+  'abs': {zh:'绝对值', d:'把负数变成正数，正数不变。', ex:'abs(-3)  # 3'},
+  'sum': {zh:'求和', d:'把一串数字加起来。', ex:'sum([1, 2, 3])  # 6'},
+  'max': {zh:'最大值', d:'返回一串数里最大的那个。', ex:'max(3, 7, 2)  # 7'},
+  'min': {zh:'最小值', d:'返回一串数里最小的那个。', ex:'min(3, 7, 2)  # 2'},
+  'sorted': {zh:'排序', d:'返回排好序的新列表，原列表不变。', ex:'sorted([3, 1, 2])  # [1, 2, 3]'},
+  'reversed': {zh:'反转', d:'把序列倒过来遍历。', ex:'list(reversed([1, 2, 3]))'},
+  'enumerate': {zh:'带下标遍历', d:'循环时同时拿到下标和元素。', ex:'for i, v in enumerate(["a", "b"]):'},
+  'zip': {zh:'拉链合并', d:'把两个序列按位置配对。', ex:'for a, b in zip([1, 2], ["x", "y"]):'},
+  'map': {zh:'逐个映射', d:'对序列里每个元素应用同一个函数。', ex:'list(map(str, [1, 2]))'},
+  'filter': {zh:'筛选', d:'只保留让条件为真的元素。', ex:'list(filter(lambda x: x > 0, [-1, 2]))'},
+  'open': {zh:'打开文件', d:'打开文件读写，常配合 with 用来自动关闭。', ex:'with open("a.txt", "r", encoding="utf-8") as f:\n    text = f.read()'},
+  'type': {zh:'类型', d:'查看一个对象是什么类型。', ex:'type(3)  # <class "int">'},
+  'isinstance': {zh:'是某类型的实例', d:'判断对象是不是属于某个类型（或元组里的任一类型）。', ex:'isinstance(3, int)  # True'},
+  'help': {zh:'查看帮助', d:'显示函数或对象的说明文档。', ex:'help(print)'},
+  'round': {zh:'四舍五入', d:'把小数保留到指定的小数位数。', ex:'round(3.14159, 2)  # 3.14'},
+  'pow': {zh:'乘方', d:'求 a 的 b 次方，等价于 a ** b。', ex:'pow(2, 3)  # 8'},
+  'self': {zh:'实例自己', d:'类的方法里第一个参数，代表当前对象。', ex:'class A:\n    def hi(self):\n        print("hi")'},
+  '__init__': {zh:'初始化方法', d:'创建对象时自动调用，用来给对象设置初始属性。', ex:'class A:\n    def __init__(self):\n        self.x = 0'},
+  '__name__': {zh:'模块名', d:'当前模块的名字；直接运行脚本时值是 "__main__"。', ex:'if __name__ == "__main__":\n    main()'},
+  'super': {zh:'调用父类', d:'用来调用父类的方法，常见于子类初始化。', ex:'super().__init__()'},
+  'try': {zh:'尝试', d:'把可能出错的代码放进去，出错时走 except。', ex:'try:\n    x = int(s)\nexcept ValueError:\n    print("不是数字")'},
+  'except': {zh:'捕获异常', d:'try 里出错时执行这里，可以指定异常类型。', ex:'except ValueError:'},
+  'finally': {zh:'最后一定执行', d:'不管有没有出错，收尾代码都会跑。', ex:'finally:\n    f.close()'},
+  'raise': {zh:'抛出异常', d:'主动报错，把问题抛给上层处理。', ex:'raise ValueError("必须是正数")'},
+  'assert': {zh:'断言', d:'条件不成立就报错，用来检查假设。', ex:'assert n > 0'},
+  'del': {zh:'删除', d:'删掉变量或容器里的某个元素。', ex:'del nums[0]'},
+  'global': {zh:'全局变量', d:'在函数里声明要修改模块级变量。', ex:'global count'},
+  'nonlocal': {zh:'外层变量', d:'在嵌套函数里声明要修改外层函数的变量。', ex:'nonlocal total'},
+  'lambda': {zh:'匿名函数', d:'一行写完的小函数，常用作参数。', ex:'f = lambda x: x * 2'},
+  'yield': {zh:'产出', d:'把函数变成生成器，每次产出一个值后暂停。', ex:'def gen():\n    yield 1'},
+  'pass': {zh:'占位', d:'语法上需要一句话但暂时什么都不做。', ex:'def todo():\n    pass'},
+  'with': {zh:'上下文管理', d:'进入代码块前准备资源，离开时自动清理（比如关文件）。', ex:'with open("a.txt") as f:'},
+  'append': {zh:'追加', d:'把元素加到列表末尾。', ex:'nums.append(4)'},
+  'pop': {zh:'弹出', d:'删掉并返回指定位置（默认末尾）的元素。', ex:'nums.pop()'},
+  'keys': {zh:'所有键', d:'返回字典里全部的键。', ex:'d.keys()'},
+  'items': {zh:'键值对', d:'返回字典里的 (键, 值) 对，常用来遍历。', ex:'for k, v in d.items():'},
+  'split': {zh:'切分', d:'按分隔符把字符串切成列表。', ex:'"a,b,c".split(",")  # ["a", "b", "c"]'},
+  'join': {zh:'拼接', d:'用分隔符把列表里的字符串连起来。', ex:'",".join(["a", "b"])  # "a,b"'},
+  'strip': {zh:'去掉首尾空白', d:'删掉字符串两端的空格、换行等。', ex:'"  hi  ".strip()  # "hi"'},
+  'format': {zh:'格式化', d:'把值填进字符串的占位符里。', ex:'"{}岁".format(18)'},
+  'replace': {zh:'替换', d:'把字符串里的一部分换成另一部分。', ex:'"abc".replace("b", "x")'},
+  'count': {zh:'计数', d:'统计某个值在序列里出现了几次。', ex:'"banana".count("a")  # 3'},
+  'find': {zh:'查找位置', d:'返回子串第一次出现的位置，找不到返回 -1。', ex:'"abc".find("b")  # 1'},
+  'sort': {zh:'就地排序', d:'直接改原列表的顺序。', ex:'nums.sort()'},
+  'reverse': {zh:'就地反转', d:'直接改原列表的顺序，倒过来。', ex:'nums.reverse()'},
+  'upper': {zh:'转大写', d:'把字符串里的字母全变成大写。', ex:'"abc".upper()  # "ABC"'},
+  'lower': {zh:'转小写', d:'把字符串里的字母全变成小写。', ex:'"ABC".lower()  # "abc"'},
+  'Exception': {zh:'异常基类', d:'大多数异常都继承自 Exception。', ex:'try:\n    ...\nexcept Exception as e:'},
+  'ValueError': {zh:'值错误', d:'类型对但值不合适时抛出，比如 int("abc")。', ex:'int("abc")  # ValueError'},
+  'TypeError': {zh:'类型错误', d:'对不合适的类型做操作时抛出，比如 "a" + 1。', ex:'"a" + 1  # TypeError'},
+  'KeyError': {zh:'键不存在', d:'用字典里没有的键取值时抛出。', ex:'d["nokey"]  # KeyError'},
+  'IndexError': {zh:'下标越界', d:'列表下标超出范围时抛出。', ex:'[1, 2][5]  # IndexError'}
+},
+c_cpp: {
+  '#include': {zh:'包含头文件', d:'把标准库或别的文件的声明拿进来，比如 stdio.h 提供 printf。', ex:'#include <stdio.h>'},
+  '#define': {zh:'宏定义', d:'预处理阶段做文本替换，常用来定义常量或小宏。', ex:'#define MAX 100'},
+  'int': {zh:'整数类型', d:'声明一个整数变量或函数返回整数。', ex:'int age = 18;'},
+  'void': {zh:'无类型', d:'表示函数不返回值，或指针指向任意类型。', ex:'void sayHi() {}'},
+  'char': {zh:'字符类型', d:'存单个字符，也是字符串的基本单位。', ex:'char c = "A";'},
+  'float': {zh:'单精度小数', d:'存小数，精度约 6~7 位。', ex:'float pi = 3.14f;'},
+  'double': {zh:'双精度小数', d:'存小数，精度比 float 高。', ex:'double d = 3.14159;'},
+  'long': {zh:'长整数', d:'比 int 范围更大的整数类型。', ex:'long big = 123456789L;'},
+  'short': {zh:'短整数', d:'比 int 范围更小的整数类型。', ex:'short s = 1;'},
+  'unsigned': {zh:'无符号', d:'只能存非负数的整数修饰符。', ex:'unsigned int n = 5;'},
+  'const': {zh:'常量', d:'声明后值不能再改。', ex:'const int N = 10;'},
+  'static': {zh:'静态', d:'变量的生命周期延长到整个程序，函数只在本文件可见。', ex:'static int count = 0;'},
+  'struct': {zh:'结构体', d:'把几个不同类型的字段打包成一种新类型。', ex:'struct Point { int x; int y; };'},
+  'class': {zh:'类', d:'C++ 里的对象类型，成员默认私有。', ex:'class Dog { public: void bark(); };'},
+  'public': {zh:'公开成员', d:'类外也能访问。', ex:'public: int x;'},
+  'private': {zh:'私有成员', d:'只有类内部能访问。', ex:'private: int x;'},
+  'typedef': {zh:'类型别名', d:'给已有类型起个新名字。', ex:'typedef int myint;'},
+  'enum': {zh:'枚举', d:'定义一组有名字的整数常量。', ex:'enum Color { RED, GREEN, BLUE };'},
+  'sizeof': {zh:'占用字节数', d:'求类型或变量在内存里占多少字节。', ex:'sizeof(int)  // 4'},
+  'printf': {zh:'格式化输出', d:'按格式串把变量打印到屏幕。', ex:'printf("%d\\n", n);', doc:'https://en.cppreference.com/w/c/io/fprintf'},
+  'scanf': {zh:'格式化输入', d:'按格式从键盘读入变量。', ex:'scanf("%d", &n);'},
+  'malloc': {zh:'申请内存', d:'在堆上分配指定字节数的内存，用完要 free。', ex:'int *p = malloc(10 * sizeof(int));'},
+  'free': {zh:'释放内存', d:'把 malloc 申请的内存还给系统。', ex:'free(p);'},
+  'strlen': {zh:'字符串长度', d:'返回字符串到 \\0 之前的字符个数。', ex:'strlen("abc")  // 3'},
+  'strcpy': {zh:'复制字符串', d:'把源字符串拷进目标数组。', ex:'strcpy(dst, src);'},
+  'strcmp': {zh:'比较字符串', d:'相等返回 0，按字典序返回正负。', ex:'strcmp(a, b) == 0'},
+  'memset': {zh:'填内存', d:'把一段内存的每个字节设成同一个值。', ex:'memset(arr, 0, sizeof(arr));'},
+  'memcpy': {zh:'拷内存', d:'把一块内存原样复制到另一块。', ex:'memcpy(dst, src, n);'},
+  'fopen': {zh:'打开文件', d:'返回文件指针，失败返回 NULL。', ex:'FILE *f = fopen("a.txt", "r");'},
+  'fclose': {zh:'关闭文件', d:'关闭文件并刷新缓冲区。', ex:'fclose(f);'},
+  'fgets': {zh:'读一行', d:'从文件读一行到缓冲区。', ex:'fgets(buf, 100, f);'},
+  'puts': {zh:'输出字符串', d:'打印一行字符串并自动换行。', ex:'puts("hello");'},
+  'gets': {zh:'读一行（危险）', d:'旧版读一行函数，不检查长度，已废弃。', ex:'gets(buf);  // 不建议用'},
+  'getchar': {zh:'读一个字符', d:'从标准输入读一个字符。', ex:'char c = getchar();'},
+  'putchar': {zh:'输出一个字符', d:'把字符写到屏幕。', ex:'putchar("A");'},
+  'exit': {zh:'退出程序', d:'立即结束程序，返回状态码。', ex:'exit(0);'},
+  'atoi': {zh:'字符串转整数', d:'把数字字符串转成 int。', ex:'atoi("42")  // 42'},
+  'atof': {zh:'字符串转小数', d:'把数字字符串转成 double。', ex:'atof("3.14")'},
+  'new': {zh:'创建对象', d:'C++ 里在堆上创建对象，返回指针。', ex:'int *p = new int(5);'},
+  'delete': {zh:'删除对象', d:'释放 new 出来的内存。', ex:'delete p;'},
+  'this': {zh:'当前对象', d:'类方法里指向调用它的对象。', ex:'this->x = x;'},
+  'nullptr': {zh:'空指针', d:'C++11 起表示空指针的字面量。', ex:'int *p = nullptr;'},
+  'true': {zh:'真', d:'C++ 布尔值。', ex:'bool ok = true;'},
+  'false': {zh:'假', d:'C++ 布尔值。', ex:'bool ok = false;'},
+  'cin': {zh:'标准输入', d:'C++ 的控制台输入对象。', ex:'cin >> n;'},
+  'cout': {zh:'标准输出', d:'C++ 的控制台输出对象。', ex:'cout << "hi" << endl;'},
+  'endl': {zh:'换行并刷新', d:'输出一个换行符并刷新缓冲区。', ex:'cout << endl;'},
+  'sort': {zh:'排序', d:'C++ 标准库的排序函数，默认升序。', ex:'sort(a, a + n);'},
+  'push_back': {zh:'尾部追加', d:'往 vector 末尾加一个元素。', ex:'v.push_back(3);'},
+  'size': {zh:'元素个数', d:'返回容器里元素的个数。', ex:'v.size()'},
+  'string': {zh:'字符串类', d:'C++ 的字符串类型，比 char 数组好用。', ex:'string s = "hi";'},
+  'main': {zh:'程序入口', d:'程序从 main 函数开始执行。', ex:'int main() {\n    return 0;\n}'}
+},
+java: {
+  'public': {zh:'公开的', d:'任何地方都能访问。', ex:'public class Main {}'},
+  'private': {zh:'私有的', d:'只有本类内部能访问。', ex:'private int age;'},
+  'protected': {zh:'受保护的', d:'本类、同包、子类能访问。', ex:'protected void run() {}'},
+  'class': {zh:'类', d:'定义一个类。', ex:'class Dog {}'},
+  'interface': {zh:'接口', d:'定义一组方法签名，由类去实现。', ex:'interface Runnable { void run(); }'},
+  'extends': {zh:'继承', d:'继承父类，拿到父类的成员。', ex:'class Dog extends Animal {}'},
+  'implements': {zh:'实现接口', d:'声明这个类实现某个接口。', ex:'class A implements Runnable {}'},
+  'package': {zh:'包声明', d:'声明当前文件属于哪个包。', ex:'package com.example;'},
+  'import': {zh:'导入', d:'引入其他包里的类。', ex:'import java.util.Scanner;'},
+  'static': {zh:'静态', d:'属于类本身而不是某个对象。', ex:'static int count = 0;'},
+  'final': {zh:'最终', d:'变量不能改、方法不能重写、类不能被继承。', ex:'final int N = 10;'},
+  'void': {zh:'无返回值', d:'方法不返回任何值。', ex:'void sayHi() {}'},
+  'int': {zh:'整数类型', d:'32 位整数。', ex:'int age = 18;'},
+  'String': {zh:'字符串类型', d:'不可变的文本类型。', ex:'String name = "小明";'},
+  'boolean': {zh:'布尔类型', d:'只有 true 和 false。', ex:'boolean ok = true;'},
+  'double': {zh:'双精度小数', d:'64 位浮点数。', ex:'double pi = 3.14;'},
+  'char': {zh:'字符类型', d:'单个字符。', ex:'char c = "A";'},
+  'new': {zh:'创建对象', d:'在堆上创建一个新对象。', ex:'Scanner sc = new Scanner(System.in);'},
+  'this': {zh:'当前对象', d:'指代调用这个方法的对象。', ex:'this.name = name;'},
+  'super': {zh:'父类', d:'调用父类的构造方法或成员。', ex:'super();'},
+  'try': {zh:'尝试', d:'可能出错的代码放这里。', ex:'try {\n    int n = Integer.parseInt(s);\n} catch (Exception e) {}'},
+  'catch': {zh:'捕获异常', d:'try 出错时执行，括号里写异常类型。', ex:'catch (Exception e) {}'},
+  'finally': {zh:'最后执行', d:'无论是否出错都执行。', ex:'finally { sc.close(); }'},
+  'throw': {zh:'抛出异常', d:'主动抛出一个异常对象。', ex:'throw new RuntimeException("错");'},
+  'throws': {zh:'声明抛异常', d:'方法签名里声明可能抛出哪些异常。', ex:'void read() throws IOException {}'},
+  'System': {zh:'系统类', d:'包含 out、in、err 等系统级对象。', ex:'System.out.println("hi");'},
+  'out': {zh:'标准输出', d:'System 里的输出流对象。', ex:'System.out.println("hi");'},
+  'println': {zh:'打印并换行', d:'输出一行内容后换行。', ex:'System.out.println("hi");'},
+  'print': {zh:'打印不换行', d:'输出内容，不自动换行。', ex:'System.out.print("hi");'},
+  'Scanner': {zh:'扫描输入', d:'从控制台或文件读数据的类。', ex:'Scanner sc = new Scanner(System.in);\nint n = sc.nextInt();'},
+  'nextInt': {zh:'读整数', d:'从输入里读一个整数。', ex:'int n = sc.nextInt();'},
+  'nextLine': {zh:'读一行', d:'从输入里读一整行字符串。', ex:'String s = sc.nextLine();'},
+  'Math': {zh:'数学工具类', d:'提供 abs、sqrt、pow、random 等数学函数。', ex:'Math.sqrt(9)'},
+  'Arrays': {zh:'数组工具类', d:'提供 sort、toString 等数组操作。', ex:'Arrays.sort(arr);'},
+  'Integer': {zh:'整数包装类', d:'把 int 包成对象，提供 parseInt 等方法。', ex:'Integer.parseInt("42")'},
+  'parseInt': {zh:'字符串转整数', d:'把字符串解析成 int。', ex:'int n = Integer.parseInt("42");'},
+  'length': {zh:'长度', d:'数组的长度属性 / 字符串的长度方法。', ex:'arr.length / s.length()'},
+  'equals': {zh:'相等比较', d:'比较两个对象的内容是否相同。', ex:'s1.equals(s2)'},
+  'main': {zh:'程序入口', d:'Java 程序从 public static void main 开始执行。', ex:'public static void main(String[] args) {}'},
+  'args': {zh:'命令行参数', d:'main 方法的参数，存命令行传进来的字符串。', ex:'main(String[] args)'}
+},
+js_ts: {
+  'const': {zh:'常量', d:'声明一个不能重新赋值的变量。', ex:'const PI = 3.14;'},
+  'let': {zh:'变量', d:'声明一个块级作用域的变量。', ex:'let count = 0;'},
+  'var': {zh:'变量（旧）', d:'旧式声明，作用域是函数级，容易出坑。', ex:'var x = 1;'},
+  'function': {zh:'函数', d:'定义一个函数。', ex:'function add(a, b) {\n  return a + b;\n}'},
+  'return': {zh:'返回', d:'结束函数并交回结果。', ex:'return a + b;'},
+  'class': {zh:'类', d:'定义一种对象类型。', ex:'class Dog {}'},
+  'new': {zh:'创建实例', d:'用构造函数创建对象。', ex:'const d = new Dog();'},
+  'this': {zh:'当前对象', d:'指向调用方法的对象。', ex:'this.name = name;'},
+  'async': {zh:'异步函数', d:'声明一个返回 Promise 的函数，内部可用 await。', ex:'async function load() {}'},
+  'await': {zh:'等待异步结果', d:'等 Promise 完成，拿到结果再往下走。', ex:'const data = await fetch(url);'},
+  'true': {zh:'真', d:'布尔值。', ex:'let ok = true;'},
+  'false': {zh:'假', d:'布尔值。', ex:'let ok = false;'},
+  'null': {zh:'空', d:'表示「故意设为空」。', ex:'let x = null;'},
+  'undefined': {zh:'未定义', d:'变量声明了但没赋值时的值。', ex:'let x;  // undefined'},
+  'typeof': {zh:'类型查询', d:'返回一个值是什么类型。', ex:'typeof 123  // "number"'},
+  'console': {zh:'控制台', d:'浏览器的调试控制台对象。', ex:'console.log("hi");'},
+  'log': {zh:'打印', d:'在控制台输出内容。', ex:'console.log("hi");'},
+  'document': {zh:'文档对象', d:'代表整个网页，用来查元素、改内容。', ex:'document.querySelector("#app")'},
+  'window': {zh:'窗口对象', d:'浏览器窗口的全局对象。', ex:'window.innerWidth'},
+  'querySelector': {zh:'选择第一个元素', d:'按 CSS 选择器找到第一个匹配的元素。', ex:'document.querySelector(".box")'},
+  'querySelectorAll': {zh:'选择所有元素', d:'按 CSS 选择器找到全部匹配的元素。', ex:'document.querySelectorAll("li")'},
+  'getElementById': {zh:'按 id 找元素', d:'用 id 属性找一个元素。', ex:'document.getElementById("app")'},
+  'addEventListener': {zh:'绑定事件', d:'给元素或窗口绑一个事件处理函数。', ex:'btn.addEventListener("click", () => {});'},
+  'fetch': {zh:'发网络请求', d:'请求接口或文件，返回 Promise。', ex:'const r = await fetch("/api");'},
+  'Promise': {zh:'承诺对象', d:'表示一个还没完成、将来会有结果的异步操作。', ex:'new Promise((resolve) => {})'},
+  'setTimeout': {zh:'延迟执行', d:'过指定毫秒数后执行一次函数。', ex:'setTimeout(() => {}, 1000);'},
+  'setInterval': {zh:'定时执行', d:'每隔指定毫秒数执行一次函数。', ex:'setInterval(() => {}, 1000);'},
+  'Array': {zh:'数组', d:'有序的元素列表。', ex:'const a = new Array(3);'},
+  'Object': {zh:'对象', d:'键值对集合。', ex:'const o = {a: 1};'},
+  'JSON': {zh:'JSON 工具', d:'提供 parse 和 stringify 做 JSON 转换。', ex:'JSON.parse("{\\"a\\":1}")'},
+  'parseInt': {zh:'转整数', d:'把字符串解析成整数。', ex:'parseInt("42px")  // 42'},
+  'parseFloat': {zh:'转小数', d:'把字符串解析成小数。', ex:'parseFloat("3.14")'},
+  'isNaN': {zh:'是 NaN 吗', d:'判断一个值是不是「非数字」。', ex:'isNaN("abc")  // true'},
+  'map': {zh:'映射', d:'对数组每个元素处理后返回新数组。', ex:'[1, 2].map(x => x * 2)'},
+  'filter': {zh:'筛选', d:'保留让条件为真的元素，返回新数组。', ex:'[1, 2, 3].filter(x => x > 1)'},
+  'reduce': {zh:'归约', d:'把数组压成一个值（求和、拼接等）。', ex:'[1, 2, 3].reduce((a, b) => a + b, 0)'},
+  'forEach': {zh:'逐个遍历', d:'对数组每个元素执行一次函数。', ex:'[1, 2].forEach(x => console.log(x))'},
+  'push': {zh:'尾部追加', d:'往数组末尾加元素。', ex:'arr.push(4);'},
+  'pop': {zh:'尾部弹出', d:'删掉并返回数组最后一个元素。', ex:'arr.pop();'},
+  'join': {zh:'拼接', d:'把数组元素用分隔符连成字符串。', ex:'[1, 2].join(",")'},
+  'split': {zh:'切分', d:'按分隔符把字符串切成数组。', ex:'"a,b".split(",")'},
+  'slice': {zh:'截取', d:'取数组/字符串的一段，不改原值。', ex:'arr.slice(1, 3)'},
+  'splice': {zh:'增删改', d:'在数组中间删除/插入元素，会改原数组。', ex:'arr.splice(1, 1, "x")'},
+  'indexOf': {zh:'找位置', d:'返回元素第一次出现的下标，找不到返回 -1。', ex:'arr.indexOf(2)'},
+  'includes': {zh:'包含吗', d:'判断数组或字符串里有没有这个值。', ex:'arr.includes(2)'},
+  'length': {zh:'长度', d:'数组或字符串的元素个数。', ex:'arr.length'},
+  'import': {zh:'导入', d:'引入其他模块导出的内容。', ex:'import { add } from "./math.js";'},
+  'export': {zh:'导出', d:'把本模块的内容暴露给别的模块。', ex:'export function add() {}'},
+  'default': {zh:'默认导出', d:'export default 导出这个模块的主内容。', ex:'export default function() {}'}
+},
+sql: {
+  'SELECT': {zh:'查询', d:'指定要取哪些列。', ex:'SELECT name, age FROM users;'},
+  'FROM': {zh:'来自', d:'指定从哪张表取数据。', ex:'SELECT * FROM users;'},
+  'WHERE': {zh:'条件', d:'只保留满足条件的行。', ex:'SELECT * FROM users WHERE age > 18;'},
+  'AND': {zh:'并且', d:'两个条件都成立才保留。', ex:'WHERE age > 18 AND city = "北京"'},
+  'OR': {zh:'或者', d:'任意一个条件成立就保留。', ex:'WHERE age < 18 OR age > 60'},
+  'NOT': {zh:'非', d:'把条件反过来。', ex:'WHERE NOT city = "北京"'},
+  'IN': {zh:'在列表里', d:'值等于列表里任意一个就匹配。', ex:'WHERE id IN (1, 2, 3)'},
+  'LIKE': {zh:'模糊匹配', d:'用 % 匹配任意字符、_ 匹配单个字符。', ex:'WHERE name LIKE "张%"'},
+  'BETWEEN': {zh:'在区间内', d:'值落在两个边界之间（含边界）。', ex:'WHERE age BETWEEN 18 AND 30'},
+  'IS': {zh:'是', d:'配合 NULL 判断是否为空。', ex:'WHERE email IS NULL'},
+  'NULL': {zh:'空值', d:'表示缺失/未知的数据，不能用 = 判断。', ex:'WHERE email IS NULL'},
+  'INSERT INTO': {zh:'插入', d:'往表里加新行。', ex:'INSERT INTO users (name, age) VALUES ("小明", 18);'},
+  'VALUES': {zh:'插入的值', d:'给 INSERT 提供具体数据。', ex:'VALUES ("小明", 18)'},
+  'UPDATE': {zh:'更新', d:'修改已有的行。', ex:'UPDATE users SET age = 19 WHERE id = 1;'},
+  'SET': {zh:'设为', d:'UPDATE 里指定要改的列和新值。', ex:'SET age = 19'},
+  'DELETE': {zh:'删除', d:'删掉满足条件的行。', ex:'DELETE FROM users WHERE id = 1;'},
+  'CREATE TABLE': {zh:'建表', d:'新建一张表，定义列和类型。', ex:'CREATE TABLE users (id INT, name VARCHAR(20));'},
+  'DROP': {zh:'删除表', d:'把整张表删掉（结构带数据）。', ex:'DROP TABLE users;'},
+  'ALTER': {zh:'改表结构', d:'给表加列、改列、删列。', ex:'ALTER TABLE users ADD COLUMN age INT;'},
+  'PRIMARY KEY': {zh:'主键', d:'唯一标识每一行，不能重复也不能为空。', ex:'id INT PRIMARY KEY'},
+  'FOREIGN KEY': {zh:'外键', d:'引用另一张表的主键，保证数据关联有效。', ex:'FOREIGN KEY (uid) REFERENCES users(id)'},
+  'JOIN': {zh:'连接', d:'把两张表按关联条件拼在一起。', ex:'SELECT * FROM orders JOIN users ON orders.uid = users.id;'},
+  'ON': {zh:'连接条件', d:'JOIN 时指定两张表怎么对应。', ex:'ON a.id = b.aid'},
+  'GROUP BY': {zh:'分组', d:'按某列把行分组，常配合聚合函数统计。', ex:'SELECT city, COUNT(*) FROM users GROUP BY city;'},
+  'ORDER BY': {zh:'排序', d:'按某列升序（ASC）或降序（DESC）排。', ex:'SELECT * FROM users ORDER BY age DESC;'},
+  'HAVING': {zh:'分组后过滤', d:'对 GROUP BY 之后的结果再做条件筛选。', ex:'GROUP BY city HAVING COUNT(*) > 10'},
+  'LIMIT': {zh:'限制行数', d:'只返回前几行。', ex:'SELECT * FROM users LIMIT 10;'},
+  'OFFSET': {zh:'跳过行', d:'跳过前几行，常用来分页。', ex:'LIMIT 10 OFFSET 20'},
+  'DISTINCT': {zh:'去重', d:'去掉重复的行。', ex:'SELECT DISTINCT city FROM users;'},
+  'AS': {zh:'起别名', d:'给列或表起个临时名字。', ex:'SELECT name AS 姓名 FROM users;'},
+  'COUNT': {zh:'计数', d:'统计行数。', ex:'SELECT COUNT(*) FROM users;'},
+  'SUM': {zh:'求和', d:'把某列的值加起来。', ex:'SELECT SUM(price) FROM orders;'},
+  'AVG': {zh:'平均值', d:'求某列的平均数。', ex:'SELECT AVG(age) FROM users;'},
+  'MAX': {zh:'最大值', d:'某列最大的值。', ex:'SELECT MAX(age) FROM users;'},
+  'MIN': {zh:'最小值', d:'某列最小的值。', ex:'SELECT MIN(age) FROM users;'},
+  'ASC': {zh:'升序', d:'从小到大排序（默认）。', ex:'ORDER BY age ASC'},
+  'DESC': {zh:'降序', d:'从大到小排序。', ex:'ORDER BY age DESC'},
+  'UNION': {zh:'合并结果', d:'把两个查询的结果上下拼起来（自动去重）。', ex:'SELECT id FROM a UNION SELECT id FROM b;'}
+},
+web: {
+  'html': {zh:'HTML 根元素', d:'整个网页的根标签。', ex:'<html lang="zh">…</html>'},
+  'head': {zh:'头部', d:'放标题、样式、脚本等页面设置，不直接显示。', ex:'<head><title>页</title></head>'},
+  'body': {zh:'主体', d:'页面上能看见的内容都放这里。', ex:'<body><h1>你好</h1></body>'},
+  'div': {zh:'块容器', d:'把一块内容包起来，常用来布局。', ex:'<div class="box">内容</div>'},
+  'span': {zh:'行内容器', d:'包一小段文字，用来单独设样式。', ex:'<span class="red">红字</span>'},
+  'p': {zh:'段落', d:'一段文字。', ex:'<p>这是一段话。</p>'},
+  'a': {zh:'链接', d:'点击跳到另一个地址。', ex:'<a href="https://example.com">去这里</a>'},
+  'img': {zh:'图片', d:'插入一张图片。', ex:'<img src="a.png" alt="图">'},
+  'script': {zh:'脚本', d:'放 JavaScript 代码或引入外部脚本。', ex:'<script src="app.js"><\/script>'},
+  'style': {zh:'样式', d:'放 CSS 代码。', ex:'<style> body { color: red; } </style>'},
+  'link': {zh:'引入资源', d:'常用来引入外部 CSS 文件。', ex:'<link rel="stylesheet" href="style.css">'},
+  'meta': {zh:'元信息', d:'声明编码、视口等页面信息。', ex:'<meta charset="UTF-8">'},
+  'title': {zh:'标题', d:'浏览器标签页上显示的标题。', ex:'<title>我的页面</title>'},
+  'h1': {zh:'一级标题', d:'最大的标题，h1~h6 依次变小。', ex:'<h1>大标题</h1>'},
+  'ul': {zh:'无序列表', d:'用圆点标记的列表，里面放 li。', ex:'<ul><li>一</li></ul>'},
+  'li': {zh:'列表项', d:'列表里的一项。', ex:'<li>第一项</li>'},
+  'table': {zh:'表格', d:'用行和列展示数据。', ex:'<table><tr><td>1</td></tr></table>'},
+  'tr': {zh:'表格行', d:'表格的一行。', ex:'<tr><td>1</td></tr>'},
+  'td': {zh:'表格单元格', d:'表格里的一个格子。', ex:'<td>1</td>'},
+  'th': {zh:'表头单元格', d:'表头里的格子，默认加粗居中。', ex:'<th>姓名</th>'},
+  'input': {zh:'输入框', d:'让用户输入内容，type 决定类型。', ex:'<input type="text" placeholder="姓名">'},
+  'button': {zh:'按钮', d:'可点击的按钮。', ex:'<button>提交</button>'},
+  'form': {zh:'表单', d:'收集输入并提交到服务器。', ex:'<form action="/save" method="post">…</form>'},
+  'label': {zh:'标签文字', d:'给输入框配说明文字。', ex:'<label>年龄<input type="number"></label>'},
+  'class': {zh:'类名', d:'给元素打标签，CSS 用 .类名 选中它。', ex:'<div class="card">…</div>'},
+  'id': {zh:'id', d:'元素的唯一标识，CSS 用 #id 选中，JS 用 getElementById 找。', ex:'<div id="app">…</div>'},
+  'href': {zh:'链接地址', d:'a 标签要跳转的目标地址。', ex:'<a href="https://example.com">'},
+  'src': {zh:'资源地址', d:'img/script 等标签要加载的文件地址。', ex:'<img src="a.png">'},
+  'alt': {zh:'替代文字', d:'图片加载失败或读屏时显示的说明。', ex:'<img src="a.png" alt="一只猫">'},
+  'color': {zh:'文字颜色', d:'CSS 属性，设置文字颜色。', ex:'p { color: red; }'},
+  'background': {zh:'背景', d:'CSS 属性，设置背景色或背景图。', ex:'body { background: #f5f5f5; }'},
+  'font-size': {zh:'字号', d:'CSS 属性，设置文字大小。', ex:'p { font-size: 16px; }'},
+  'margin': {zh:'外边距', d:'元素外部的空白距离。', ex:'div { margin: 10px; }'},
+  'padding': {zh:'内边距', d:'元素内容与边框之间的距离。', ex:'div { padding: 10px; }'},
+  'display': {zh:'显示方式', d:'CSS 属性，控制元素是块级、行内还是弹性布局。', ex:'div { display: flex; }'},
+  'flex': {zh:'弹性布局', d:'display: flex 开启的横向/纵向排布方式。', ex:'div { display: flex; gap: 8px; }'},
+  'width': {zh:'宽度', d:'CSS 属性，设置元素宽度。', ex:'div { width: 100px; }'},
+  'height': {zh:'高度', d:'CSS 属性，设置元素高度。', ex:'div { height: 100px; }'},
+  'border': {zh:'边框', d:'CSS 属性，设置边框线。', ex:'div { border: 1px solid #ccc; }'},
+  'text-align': {zh:'文字对齐', d:'CSS 属性，控制文字左/中/右对齐。', ex:'p { text-align: center; }'}
+}
+};
+/* ================= 语言配置 ================= */
+const OPS = ['**=','//=','->','::','**','//','==','!=','<=','>=','&&','||','+=','-=','*=','/=','%=','=>',':=','<<','>>','++','--',
+  '+','-','*','/','%','=','!','<','>','&','|','^','~','?',':','.',',',';','(',')','[',']','{','}','@'];
+
+const LANGS = {
+  python: {
+    label: 'Python', kind: 'clike',
+    lineComments: ['#'], block: null,
+    strings: [['"""','"""',true],["'''","'''",true],['"','"',false],["'","'",false]],
+    kw: ['False','None','True','and','as','assert','async','await','break','class','continue','def','del','elif','else','except','finally','for','from','global','if','import','in','is','lambda','nonlocal','not','or','pass','raise','return','try','while','with','yield','match','case'],
+    bi: ['print','input','len','range','int','float','str','list','dict','tuple','set','bool','abs','sum','max','min','sorted','reversed','enumerate','zip','map','filter','open','type','isinstance','help','round','pow','divmod','chr','ord','hex','bin','iter','next','any','all'],
+    ty: [],
+    doc: 'https://docs.python.org/3/'
+  },
+  c: {
+    label: 'C', kind: 'clike',
+    lineComments: ['//'], block: ['/*','*/'],
+    strings: [['"','"',false],["'","'",false]],
+    kw: ['auto','break','case','char','const','continue','default','do','double','else','enum','extern','float','for','goto','if','inline','int','long','register','return','short','signed','sizeof','static','struct','switch','typedef','union','unsigned','void','volatile','while'],
+    bi: ['printf','scanf','malloc','free','strlen','strcpy','strcmp','memset','memcpy','fopen','fclose','fgets','puts','gets','getchar','putchar','exit','atoi','atof','abs'],
+    ty: ['size_t','FILE'],
+    doc: 'https://en.cppreference.com/w/c'
+  },
+  cpp: {
+    label: 'C++', kind: 'clike',
+    lineComments: ['//'], block: ['/*','*/'],
+    strings: [['"','"',false],["'","'",false]],
+    kw: ['auto','break','case','catch','char','class','const','constexpr','continue','default','delete','do','double','else','enum','explicit','extern','false','float','for','friend','goto','if','inline','int','long','namespace','new','nullptr','operator','private','protected','public','return','short','signed','sizeof','static','struct','switch','template','this','throw','true','try','typedef','typename','union','unsigned','using','virtual','void','volatile','while'],
+    bi: ['printf','scanf','cout','cin','endl','sort','push_back','size','malloc','free','strlen','strcpy','strcmp','getline'],
+    ty: ['string','vector','map','set','pair','size_t'],
+    doc: 'https://en.cppreference.com/w/cpp'
+  },
+  java: {
+    label: 'Java', kind: 'clike',
+    lineComments: ['//'], block: ['/*','*/'],
+    strings: [['"','"',false],["'","'",false]],
+    kw: ['abstract','assert','boolean','break','byte','case','catch','char','class','const','continue','default','do','double','else','enum','extends','final','finally','float','for','goto','if','implements','import','instanceof','int','interface','long','native','new','package','private','protected','public','return','short','static','strictfp','super','switch','synchronized','this','throw','throws','transient','try','void','volatile','while','var','record'],
+    bi: ['System','out','println','print','printf','Scanner','nextInt','nextLine','Math','abs','sqrt','pow','random','Arrays','sort','toString','equals','hashCode','Integer','parseInt','String','valueOf','length','main','args'],
+    ty: ['int','long','double','float','boolean','char','byte','short','String','List','ArrayList','Map','HashMap','Set','HashSet'],
+    doc: 'https://docs.oracle.com/javase/8/docs/api/'
+  },
+  js: {
+    label: 'JavaScript', kind: 'clike',
+    lineComments: ['//'], block: ['/*','*/'],
+    strings: [['"','"',false],["'","'",false],['`','`',true]],
+    kw: ['break','case','catch','class','const','continue','debugger','default','delete','do','else','export','extends','finally','for','function','if','import','in','instanceof','let','new','return','super','switch','this','throw','try','typeof','var','void','while','with','yield','async','await','of','static','get','set','true','false','null','undefined'],
+    bi: ['console','log','document','window','Array','Object','String','Number','Boolean','Math','JSON','Promise','setTimeout','setInterval','fetch','parseInt','parseFloat','isNaN','querySelector','querySelectorAll','addEventListener','getElementById','map','filter','reduce','forEach','push','pop','join','split','slice','splice','indexOf','includes','length'],
+    ty: [],
+    doc: 'https://developer.mozilla.org/zh-CN/docs/Web/JavaScript'
+  },
+  sql: {
+    label: 'SQL', kind: 'sql',
+    lineComments: ['--'], block: ['/*','*/'],
+    strings: [["'","'",false],['"','"',false]],
+    kw: ['SELECT','FROM','WHERE','AND','OR','NOT','IN','LIKE','BETWEEN','IS','NULL','INSERT INTO','VALUES','UPDATE','SET','DELETE','CREATE TABLE','DROP','ALTER','ADD','PRIMARY KEY','FOREIGN KEY','REFERENCES','JOIN','INNER','LEFT','RIGHT','OUTER','ON','GROUP BY','ORDER BY','HAVING','LIMIT','OFFSET','DISTINCT','AS','UNION','ALL','CASE','WHEN','THEN','ELSE','END','ASC','DESC'],
+    bi: ['COUNT','SUM','AVG','MAX','MIN'],
+    ty: ['INT','VARCHAR','CHAR','TEXT','DATE','DATETIME','FLOAT','DOUBLE','DECIMAL','BOOLEAN'],
+    doc: 'https://www.w3schools.com/sql/'
+  },
+  html: { label: 'HTML', kind: 'html', doc: 'https://developer.mozilla.org/zh-CN/docs/Web/HTML' },
+  css: { label: 'CSS', kind: 'css', doc: 'https://developer.mozilla.org/zh-CN/docs/Web/CSS' }
+};
+const LANG_ALIAS = { plain: 'Python' };
+const opsSorted = OPS.slice().sort((a, b) => b.length - a.length);
+
+function langLabel(id) { return (LANGS[id] && LANGS[id].label) || '纯文本'; }
+
+/* ================= 语言识别 ================= */
+function detectLanguage(code) {
+  const s = { python: 0, c: 0, cpp: 0, java: 0, js: 0, sql: 0, html: 0, css: 0 };
+  const has = (re) => re.test(code);
+  if (has(/#\s*include\s*<(iostream|vector|string|algorithm)>/) || has(/\bstd::/) || has(/\bcout\s*<</) || has(/\bclass\s+\w+\s*\{[\s\S]*\bpublic\s*:/)) s.cpp += 7;
+  if (has(/#\s*include\s*</) || has(/#\s*define\s+\w+/)) { s.c += 5; s.cpp += 3; }
+  if (has(/\bpublic\s+static\s+void\s+main\s*\(/) || has(/\bSystem\.out\./) || has(/\bpublic\s+class\b/)) s.java += 7;
+  if (has(/^\s*(def|class)\s+\w+.*:\s*$/m) || has(/^\s*(import|from)\s+[\w.]+/m) || has(/\bprint\s*\(/) || has(/^\s*for\s+\w+\s+in\s+/m)) s.python += 4;
+  if (has(/^\s*(const|let|var)\s+\w+/m) || has(/=>/) || has(/\bconsole\.log\s*\(/) || has(/\bfunction\s+\w*\s*\(/)) s.js += 4;
+  if (has(/\b(SELECT|INSERT|UPDATE|DELETE|CREATE)\b[\s\S]*\b(FROM|INTO|TABLE|SET|VALUES)\b/i)) s.sql += 8;
+  if (has(/^\s*<(html|head|body|div|p|a|img|script|style|h1|ul|span)\b/im) || has(/<!DOCTYPE/i)) s.html += 8;
+  if (has(/[.#]?[\w-]+\s*\{[^}]*:[^};]+;/)) s.css += 4;
+  if (has(/^\s*<[a-zA-Z!\/]/m) && has(/<\/[a-zA-Z]/)) s.html += 2;
+  const best = Object.entries(s).sort((a, b) => b[1] - a[1])[0];
+  return best[1] <= 0 ? 'python' : best[0];
+}
+
+/* ================= 分词器 ================= */
+function pushTok(lines, type, text) {
+  const parts = String(text).split('\n');
+  parts.forEach((p, idx) => {
+    if (idx > 0) lines.push([]);
+    if (p) lines[lines.length - 1].push([type, p]);
+  });
+}
+
+function scanClike(src, cfg) {
+  const lines = [[]];
+  const kwSet = new Set(cfg.kw), biSet = new Set(cfg.bi), tySet = new Set(cfg.ty);
+  const idStart = c => /[A-Za-z_$]/.test(c);
+  const idChar = c => /[A-Za-z0-9_$]/.test(c);
+  let i = 0, n = src.length;
+  while (i < n) {
+    const c = src[i];
+    if (c === '\n') { lines.push([]); i++; continue; }
+    if (cfg.block && src.startsWith(cfg.block[0], i)) {
+      const end = src.indexOf(cfg.block[1], i + cfg.block[0].length);
+      const stop = end === -1 ? n : end + cfg.block[1].length;
+      pushTok(lines, 'com', src.slice(i, stop)); i = stop; continue;
+    }
+    const mstr = cfg.strings.find(s => s[2] && src.startsWith(s[0], i));
+    if (mstr) {
+      const end = src.indexOf(mstr[1], i + mstr[0].length);
+      const stop = end === -1 ? n : end + mstr[1].length;
+      pushTok(lines, 'str', src.slice(i, stop)); i = stop; continue;
+    }
+    const lc = cfg.lineComments.find(l => src.startsWith(l, i));
+    if (lc) {
+      let end = src.indexOf('\n', i);
+      if (end === -1) end = n;
+      pushTok(lines, 'com', src.slice(i, end)); i = end; continue;
+    }
+    const st = cfg.strings.find(s => !s[2] && src.startsWith(s[0], i));
+    if (st) {
+      let j = i + st[0].length;
+      while (j < n) {
+        if (src[j] === '\\') { j += 2; continue; }
+        if (src.startsWith(st[1], j)) { j += st[1].length; break; }
+        if (src[j] === '\n') break;
+        j++;
+      }
+      pushTok(lines, 'str', src.slice(i, j)); i = j; continue;
+    }
+    if (/\d/.test(c) || (c === '.' && /\d/.test(src[i + 1] || ''))) {
+      let j = i;
+      while (j < n && /[0-9A-Fa-fxX._]/.test(src[j])) j++;
+      pushTok(lines, 'num', src.slice(i, j)); i = j; continue;
+    }
+    if (idStart(c)) {
+      let j = i;
+      while (j < n && idChar(src[j])) j++;
+      const w = src.slice(i, j);
+      const lw = w.toLowerCase();
+      let t = 'plain';
+      if (kwSet.has(w) || kwSet.has(lw)) t = 'kw';
+      else if (biSet.has(w) || biSet.has(lw)) t = 'bi';
+      else if (tySet.has(w) || tySet.has(lw)) t = 'ty';
+      pushTok(lines, t, w); i = j; continue;
+    }
+    const op = opsSorted.find(o => src.startsWith(o, i));
+    if (op) { pushTok(lines, 'op', op); i += op.length; continue; }
+    pushTok(lines, 'plain', c); i++;
+  }
+  return lines;
+}
+
+function scanSQL(src) {
+  const cfg = LANGS.sql;
+  const lines = [[]];
+  const kwSet = new Set(cfg.kw.map(k => k.toLowerCase()));
+  const biSet = new Set(cfg.bi.map(k => k.toLowerCase()));
+  let i = 0, n = src.length;
+  while (i < n) {
+    const c = src[i];
+    if (c === '\n') { lines.push([]); i++; continue; }
+    if (src.startsWith('--', i)) {
+      let end = src.indexOf('\n', i);
+      if (end === -1) end = n;
+      pushTok(lines, 'com', src.slice(i, end)); i = end; continue;
+    }
+    if (src.startsWith('/*', i)) {
+      const end = src.indexOf('*/', i + 2);
+      const stop = end === -1 ? n : end + 2;
+      pushTok(lines, 'com', src.slice(i, stop)); i = stop; continue;
+    }
+    if (c === "'" || c === '"') {
+      let j = i + 1;
+      while (j < n) {
+        if (src[j] === c) { j++; break; }
+        if (src[j] === '\n') break;
+        j++;
+      }
+      pushTok(lines, 'str', src.slice(i, j)); i = j; continue;
+    }
+    if (/\d/.test(c)) {
+      let j = i; while (j < n && /[0-9.]/.test(src[j])) j++;
+      pushTok(lines, 'num', src.slice(i, j)); i = j; continue;
+    }
+    if (/[A-Za-z_]/.test(c)) {
+      let j = i; while (j < n && /[A-Za-z0-9_]/.test(src[j])) j++;
+      const w = src.slice(i, j), lw = w.toLowerCase();
+      let t = 'plain';
+      if (kwSet.has(lw)) t = 'kw';
+      else if (biSet.has(lw)) t = 'bi';
+      else if (new Set(cfg.ty.map(x => x.toLowerCase())).has(lw)) t = 'ty';
+      pushTok(lines, t, w); i = j; continue;
+    }
+    const op = opsSorted.find(o => src.startsWith(o, i));
+    if (op) { pushTok(lines, 'op', op); i += op.length; continue; }
+    pushTok(lines, 'plain', c); i++;
+  }
+  return lines;
+}
+
+function scanHTML(src) {
+  const lines = [[]];
+  const tags = new Set(Object.keys(DICT.web));
+  let i = 0, n = src.length;
+  while (i < n) {
+    const c = src[i];
+    if (c === '\n') { lines.push([]); i++; continue; }
+    if (src.startsWith('<!--', i)) {
+      const end = src.indexOf('-->', i);
+      const stop = end === -1 ? n : end + 3;
+      pushTok(lines, 'com', src.slice(i, stop)); i = stop; continue;
+    }
+    if (c === '<') {
+      const end = src.indexOf('>', i);
+      const stop = end === -1 ? n : end + 1;
+      const tagText = src.slice(i, stop);
+      const m = tagText.match(/^<(\/?)\s*([a-zA-Z0-9-]+)/);
+      if (m) {
+        const lead = tagText.slice(0, m[0].length);
+        pushTok(lines, 'plain', '<');
+        if (m[1]) pushTok(lines, 'op', '/');
+        pushTok(lines, tags.has(m[2].toLowerCase()) ? 'tag' : 'plain', m[2]);
+        let rest = tagText.slice(m[0].length);
+        const re = /(\s+)([a-zA-Z_:][\w:.-]*)(\s*=\s*)?("[^"]*"|'[^']*')?/g;
+        let last = 0, mm;
+        while ((mm = re.exec(rest)) !== null) {
+          if (mm.index > last) pushTok(lines, 'plain', rest.slice(last, mm.index));
+          if (mm[1]) pushTok(lines, 'plain', mm[1]);
+          pushTok(lines, 'attr', mm[2]);
+          if (mm[3]) pushTok(lines, 'op', mm[3]);
+          if (mm[4]) pushTok(lines, 'str', mm[4]);
+          last = re.lastIndex;
+        }
+        if (last < rest.length) pushTok(lines, 'plain', rest.slice(last));
+      } else {
+        pushTok(lines, 'plain', tagText);
+      }
+      i = stop; continue;
+    }
+    let j = i;
+    while (j < n && src[j] !== '<' && src[j] !== '\n') j++;
+    pushTok(lines, 'plain', src.slice(i, j)); i = j;
+  }
+  return lines;
+}
+
+function scanCSS(src) {
+  const lines = [[]];
+  let i = 0, n = src.length, mode = 'sel';
+  while (i < n) {
+    const c = src[i];
+    if (c === '\n') { lines.push([]); i++; continue; }
+    if (src.startsWith('/*', i)) {
+      const end = src.indexOf('*/', i + 2);
+      const stop = end === -1 ? n : end + 2;
+      pushTok(lines, 'com', src.slice(i, stop)); i = stop; continue;
+    }
+    if (c === '"' || c === "'") {
+      let j = i + 1;
+      while (j < n && src[j] !== c && src[j] !== '\n') j++;
+      pushTok(lines, 'str', src.slice(i, Math.min(j + 1, n))); i = Math.min(j + 1, n); continue;
+    }
+    if (c === '{') { pushTok(lines, 'op', '{'); mode = 'decl'; i++; continue; }
+    if (c === '}') { pushTok(lines, 'op', '}'); mode = 'sel'; i++; continue; }
+    if (c === ';') { pushTok(lines, 'op', ';'); i++; continue; }
+    if (c === ':') { pushTok(lines, 'op', ':'); i++; continue; }
+    if (mode === 'sel') {
+      let j = i;
+      while (j < n && !'{}\n'.includes(src[j]) && !src.startsWith('/*', j)) j++;
+      pushTok(lines, 'sel', src.slice(i, j)); i = j; continue;
+    }
+    if (/[a-zA-Z-]/.test(c)) {
+      let j = i;
+      while (j < n && /[a-zA-Z-]/.test(src[j])) j++;
+      let k = j;
+      while (k < n && /\s/.test(src[k]) && src[k] !== '\n') k++;
+      pushTok(lines, src[k] === ':' ? 'prop' : 'plain', src.slice(i, j)); i = j; continue;
+    }
+    if (/\d/.test(c) || c === '#') {
+      let j = i + 1;
+      while (j < n && /[0-9A-Fa-f%#]/.test(src[j])) j++;
+      if (/[a-zA-Z]/.test(src[i] || '')) { pushTok(lines, 'plain', src.slice(i, j)); }
+      else pushTok(lines, 'num', src.slice(i, j));
+      i = j; continue;
+    }
+    pushTok(lines, 'plain', c); i++;
+  }
+  return lines;
+}
+
+function tokenizeAll(code, langId) {
+  if (langId === 'html') return scanHTML(code);
+  if (langId === 'css') return scanCSS(code);
+  if (langId === 'sql') return scanSQL(code);
+  return scanClike(code, LANGS[langId]);
+}
+/* ================= 逐行解释规则 ================= */
+const TAG_LABEL = {
+  comment:'注释', import:'导入', func:'函数', 'class':'类', decorator:'装饰器',
+  cond:'判断', loop:'循环', output:'输出', input:'输入', assign:'赋值',
+  return:'返回', call:'调用', with:'资源', try:'异常处理', jump:'跳出',
+  blank:'空行', stmt:'语句', tag:'标签', prop:'属性', text:'文字', sql:'SQL'
+};
+
+function rangeDesc(args) {
+  if (args.length === 1) return '从 0 到 ' + (parseInt(args[0], 10) - 1) + '，共 ' + args[0] + ' 次';
+  if (args.length === 2) return '从 ' + args[0] + ' 到 ' + args[1] + '-1';
+  if (args.length === 3) return '从 ' + args[0] + ' 到 ' + args[1] + '-1，每步 +' + args[2];
+  return '';
+}
+
+function pyRule(s) {
+  let m;
+  if (/^#/.test(s)) return { note: '注释：' + s.replace(/^#+\s*/, ''), tag: 'comment' };
+  if (/^("""|''')/.test(s)) return { note: '文档字符串（三引号里的说明文字，不算代码逻辑）', tag: 'comment' };
+  if ((m = s.match(/^from\s+([\w.]+)\s+import\s+(.+)$/))) return { note: '从模块 ' + m[1] + ' 中导入：' + m[2], tag: 'import' };
+  if ((m = s.match(/^import\s+(.+)$/))) return { note: '导入模块：' + m[1].replace(/\s+as\s+/g, '，并重命名为 '), tag: 'import' };
+  if ((m = s.match(/^def\s+(\w+)\s*\((.*?)\)\s*(?:->\s*([^{]+?))?\s*:/))) return { note: '定义函数 ' + m[1] + '，参数：' + (m[2] || '无') + (m[3] ? '，返回类型 ' + m[3].trim() : ''), tag: 'func' };
+  if ((m = s.match(/^class\s+(\w+)\s*(?:\((.*?)\))?\s*:/))) return { note: '定义类 ' + m[1] + (m[2] ? '，继承自 ' + m[2] : ''), tag: 'class' };
+  if ((m = s.match(/^@(\w+)/))) return { note: '装饰器 @' + m[1] + '：给下面的函数/类附加功能', tag: 'decorator' };
+  if ((m = s.match(/^if\s+(.+?)\s*:$/))) return { note: '如果 ' + m[1] + ' 成立，就执行下面的代码块', tag: 'cond' };
+  if ((m = s.match(/^elif\s+(.+?)\s*:$/))) return { note: '否则如果 ' + m[1] + ' 成立，就执行下面的代码块', tag: 'cond' };
+  if ((m = s.match(/^else\s*:$/))) return { note: '否则：上面条件都不成立时执行', tag: 'cond' };
+  if ((m = s.match(/^for\s+(.+?)\s+in\s+range\s*\((.*?)\)\s*:$/))) return { note: '循环 ' + m[1] + '：' + rangeDesc(m[2].split(',').map(x => x.trim())), tag: 'loop' };
+  if ((m = s.match(/^for\s+(.+?)\s+in\s+(.+?)\s*:$/))) return { note: '循环：' + m[1] + ' 依次取 ' + m[2] + ' 里的每个元素', tag: 'loop' };
+  if ((m = s.match(/^while\s+(.+?)\s*:$/))) return { note: '只要 ' + m[1] + ' 为真就重复执行', tag: 'loop' };
+  if ((m = s.match(/^return\b\s*(.*)$/))) return { note: m[1] ? '返回 ' + m[1] : '返回（结束函数，不返回值）', tag: 'return' };
+  if ((m = s.match(/^print\s*\((.*)\)\s*$/))) return { note: '输出：' + m[1], tag: 'output' };
+  if ((m = s.match(/^input\s*\((.*)\)\s*$/))) return { note: '等待用户输入' + (m[1] ? '，提示语：' + m[1] : ''), tag: 'input' };
+  if ((m = s.match(/^with\s+(.+?)\s+as\s+(\w+)\s*:/))) return { note: '打开 ' + m[1] + '，用变量 ' + m[2] + ' 引用，离开代码块时自动关闭', tag: 'with' };
+  if (/^try\s*:$/.test(s)) return { note: '尝试执行下面的代码（可能出错）', tag: 'try' };
+  if ((m = s.match(/^except\s*(.*?)\s*:/))) return { note: '捕获异常' + (m[1] ? '：' + m[1] : '（任意异常）'), tag: 'try' };
+  if (/^finally\s*:/.test(s)) return { note: '不管有没有出错，收尾代码都会执行', tag: 'try' };
+  if (/^break\b/.test(s)) return { note: '立刻跳出当前循环', tag: 'jump' };
+  if (/^continue\b/.test(s)) return { note: '跳过本次循环剩下的部分，进入下一次', tag: 'jump' };
+  if (/^pass\b/.test(s)) return { note: '占位：什么都不做', tag: 'stmt' };
+  if ((m = s.match(/^raise\s+(.+)$/))) return { note: '主动抛出异常：' + m[1], tag: 'try' };
+  if ((m = s.match(/^assert\s+(.+)$/))) return { note: '断言：' + m[1] + ' 不成立就报错', tag: 'cond' };
+  if ((m = s.match(/^del\s+(.+)$/))) return { note: '删除 ' + m[1], tag: 'stmt' };
+  if ((m = s.match(/^(\w+(?:\[[^\]]*\])?)\s*=(?!=)\s*(.+)$/))) return { note: '把「' + m[2] + '」赋给变量 ' + m[1], tag: 'assign' };
+  if ((m = s.match(/^(\w+(?:\.\w+)*)\s*\(.*\)\s*$/))) return { note: '调用 ' + m[1] + '(...)', tag: 'call' };
+  if ((m = s.match(/^(\w+)\.(\w+)\s*\(/))) return { note: '调用 ' + m[1] + ' 的方法 ' + m[2] + '(...)', tag: 'call' };
+  if ((m = s.match(/^\[.*\bfor\b.*\bin\b.*\]$/))) return { note: '列表推导式：按规则生成一个新列表', tag: 'stmt' };
+  return null;
+}
+
+const C_TYPES = /^(int|char|float|double|long|short|void|bool|unsigned|signed|size_t|auto|const\s+int|const\s+char|struct\s+\w+|class\s+\w+)$/;
+
+function cRule(s) {
+  let m;
+  if (/^\/\//.test(s)) return { note: '注释：' + s.replace(/^\/+\s*/, ''), tag: 'comment' };
+  if (/^\/\*/.test(s)) return { note: '块注释开始', tag: 'comment' };
+  if (/^\*/.test(s)) return { note: '块注释内容', tag: 'comment' };
+  if (/^\}/.test(s)) return { note: '代码块结束', tag: 'stmt' };
+  if (/^\{/.test(s)) return { note: '代码块开始', tag: 'stmt' };
+  if ((m = s.match(/^using\s+namespace\s+(\w+)\s*;/))) return { note: '引入 ' + m[1] + ' 命名空间，下面可以直接用里面的名字', tag: 'import' };
+  if (/^cout\s*<</.test(s)) return { note: '输出到控制台', tag: 'output' };
+  if (/^cin\s*>>/.test(s)) return { note: '从控制台读入数据', tag: 'input' };
+  if ((m = s.match(/^#\s*include\s*[<"](.+?)[>"]/))) return { note: '引入头文件 ' + m[1] + '（提供函数/类型的声明）', tag: 'import' };
+  if ((m = s.match(/^#\s*define\s+(\w+)\s*(.*)$/))) return { note: '宏定义 ' + m[1] + (m[2] ? '，替换成 ' + m[2] : ''), tag: 'import' };
+  if ((m = s.match(/^int\s+main\s*\(/)) || /^void\s+main\s*\(/.test(s)) return { note: '程序入口 main 函数：程序从这里开始执行', tag: 'func' };
+  if ((m = s.match(/^(int|void|char|float|double|bool|long|short|string|struct\s+\w+)\s+(\w+)\s*\([^;]*$/))) return { note: '定义函数 ' + m[2] + '，返回 ' + m[1], tag: 'func' };
+  if ((m = s.match(/^for\s*\((.*)\)/))) {
+    const p = m[1].split(';').map(x => x.trim());
+    return { note: 'for 循环：初始化「' + (p[0] || '') + '」，每次循环前判断「' + (p[1] || '') + '」，每轮结束执行「' + (p[2] || '') + '」', tag: 'loop' };
+  }
+  if ((m = s.match(/^while\s*\((.*)\)/))) return { note: '只要「' + m[1] + '」为真就重复执行', tag: 'loop' };
+  if ((m = s.match(/^(if|else\s+if)\s*\((.*)\)/))) return { note: '如果「' + m[2] + '」成立，执行下面的代码块', tag: 'cond' };
+  if (/^else\b/.test(s)) return { note: '否则：上面条件不成立时执行', tag: 'cond' };
+  if ((m = s.match(/^printf\s*\(/))) return { note: '按格式输出到屏幕', tag: 'output' };
+  if ((m = s.match(/^scanf\s*\(/))) return { note: '从键盘读入数据', tag: 'input' };
+  if ((m = s.match(/^(int|char|float|double|long|short|bool|unsigned|size_t)\s+(\w+)\s*\[/))) return { note: '声明 ' + m[1] + ' 数组 ' + m[2], tag: 'assign' };
+  if ((m = s.match(/^(int|char|float|double|long|short|bool|unsigned|size_t|struct\s+\w+)\s+(\w+)\s*(=.*)?;/))) return { note: '声明 ' + m[1] + ' 类型变量 ' + m[2] + (m[3] ? '，并赋初值 ' + m[3].replace(/^=\s*/, '') : ''), tag: 'assign' };
+  if ((m = s.match(/^return\b\s*(.*?);?$/))) return { note: m[1] ? '返回 ' + m[1] : '返回', tag: 'return' };
+  if ((m = s.match(/^(struct|class|union|enum)\s+(\w+)/))) return { note: '定义' + m[1] + ' ' + m[2], tag: 'class' };
+  if ((m = s.match(/^(\w+)\s*=(?!=)\s*(.+);$/))) return { note: '把「' + m[2] + '」赋给 ' + m[1], tag: 'assign' };
+  if ((m = s.match(/^(\w+)\s*\(.*\);/))) return { note: '调用函数 ' + m[1] + '(...)', tag: 'call' };
+  if (/^break\b/.test(s)) return { note: '跳出当前循环', tag: 'jump' };
+  if (/^continue\b/.test(s)) return { note: '跳过本次循环剩下的部分', tag: 'jump' };
+  return null;
+}
+
+function javaRule(s) {
+  let m;
+  if (/^\/\//.test(s)) return { note: '注释：' + s.replace(/^\/+\s*/, ''), tag: 'comment' };
+  if (/^\/\*/.test(s)) return { note: '块注释开始', tag: 'comment' };
+  if (/^\}/.test(s)) return { note: '代码块结束', tag: 'stmt' };
+  if (/^\{/.test(s)) return { note: '代码块开始', tag: 'stmt' };
+  if ((m = s.match(/^package\s+([\w.]+);/))) return { note: '声明当前文件属于包 ' + m[1], tag: 'import' };
+  if ((m = s.match(/^import\s+(.+);/))) return { note: '导入 ' + m[1], tag: 'import' };
+  if (/^public\s+class\s+(\w+)/.test(s)) return { note: '定义公开类 ' + s.match(/class\s+(\w+)/)[1] + '，类名要和文件名一致', tag: 'class' };
+  if ((m = s.match(/^public\s+static\s+void\s+main\s*\(/))) return { note: '程序入口 main 方法：Java 程序从这里开始执行', tag: 'func' };
+  if (/^@Override/.test(s)) return { note: '注解 @Override：表示这是重写父类的方法', tag: 'decorator' };
+  if ((m = s.match(/^(public|private|protected)?\s*(static)?\s*(void|int|double|float|long|boolean|char|String|List|Map)\s+(\w+)\s*\(/))) return { note: '定义方法 ' + m[4] + '，返回 ' + m[3], tag: 'func' };
+  if ((m = s.match(/^(int|double|float|long|boolean|char|byte|short|String|var)\s+(\w+)\s*(=.*)?;/))) return { note: '声明 ' + m[1] + ' 变量 ' + m[2] + (m[3] ? '，并赋初值 ' + m[3].replace(/^=\s*/, '') : ''), tag: 'assign' };
+  if ((m = s.match(/^System\.out\.(println|print|printf)\s*\(/))) return { note: m[1] === 'println' ? '打印一行并换行' : '打印内容（不换行）', tag: 'output' };
+  if ((m = s.match(/^Scanner\s+\w+\s*=\s*new\s+Scanner\s*\(/))) return { note: '创建 Scanner 对象，准备读取控制台输入', tag: 'input' };
+  if ((m = s.match(/^for\s*\((.*)\)/))) return { note: 'for 循环：' + (m[1].includes(':') ? '遍历集合里的每个元素' : '按三段式控制循环次数'), tag: 'loop' };
+  if ((m = s.match(/^while\s*\((.*)\)/))) return { note: '只要「' + m[1] + '」为真就重复执行', tag: 'loop' };
+  if ((m = s.match(/^if\s*\((.*)\)/))) return { note: '如果「' + m[1] + '」成立，执行下面的代码块', tag: 'cond' };
+  if (/^else\b/.test(s)) return { note: '否则：上面条件不成立时执行', tag: 'cond' };
+  if ((m = s.match(/^return\b\s*(.*?);?$/))) return { note: m[1] ? '返回 ' + m[1] : '返回', tag: 'return' };
+  if ((m = s.match(/^try\s*\{/))) return { note: '尝试执行下面的代码（可能出错）', tag: 'try' };
+  if ((m = s.match(/^catch\s*\((.*?)\)/))) return { note: '捕获异常：' + m[1], tag: 'try' };
+  if ((m = s.match(/^(\w+)\s*=(?!=)\s*(.+);$/))) return { note: '把「' + m[2] + '」赋给 ' + m[1], tag: 'assign' };
+  if ((m = s.match(/^(\w+)\s*\(.*\);/))) return { note: '调用方法 ' + m[1] + '(...)', tag: 'call' };
+  return null;
+}
+
+function jsRule(s) {
+  let m;
+  if (/^\/\//.test(s)) return { note: '注释：' + s.replace(/^\/+\s*/, ''), tag: 'comment' };
+  if (/^\/\*/.test(s)) return { note: '块注释开始', tag: 'comment' };
+  if (/^\}/.test(s)) return { note: '代码块结束', tag: 'stmt' };
+  if (/^\{/.test(s)) return { note: '代码块开始', tag: 'stmt' };
+  if ((m = s.match(/^(const|let|var)\s+(\w+)\s*=\s*(.+?);?$/))) return { note: '声明' + (m[1] === 'const' ? '常量' : '变量') + ' ' + m[2] + '，初始值「' + m[3] + '」', tag: 'assign' };
+  if ((m = s.match(/^function\s+(\w+)\s*\(([^)]*)\)/))) return { note: '定义函数 ' + m[1] + '，参数：' + (m[2] || '无'), tag: 'func' };
+  if ((m = s.match(/^(const|let|var)\s+(\w+)\s*=\s*\(([^)]*)\)\s*=>/))) return { note: '定义箭头函数 ' + m[2] + '，参数：' + (m[3] || '无'), tag: 'func' };
+  if (/^console\.(log|error|warn)\s*\(/.test(s)) return { note: '在控制台输出' + (s.match(/^console\.(\w+)/)[1] === 'log' ? '' : '（' + s.match(/^console\.(\w+)/)[1] + '）'), tag: 'output' };
+  if ((m = s.match(/^for\s*\((.*)\)/))) return { note: 'for 循环：' + (m[1].includes('of') || m[1].includes('in') ? '遍历数组/对象的每个元素' : '按三段式控制循环次数'), tag: 'loop' };
+  if ((m = s.match(/^while\s*\((.*)\)/))) return { note: '只要「' + m[1] + '」为真就重复执行', tag: 'loop' };
+  if ((m = s.match(/^if\s*\((.*)\)/))) return { note: '如果「' + m[1] + '」成立，执行下面的代码块', tag: 'cond' };
+  if (/^else\b/.test(s)) return { note: '否则：上面条件不成立时执行', tag: 'cond' };
+  if ((m = s.match(/^return\b\s*(.*?);?$/))) return { note: m[1] ? '返回 ' + m[1] : '返回', tag: 'return' };
+  if ((m = s.match(/^import\s+(.+?)\s+from\s+(.+?);?$/))) return { note: '从 ' + m[2] + ' 导入 ' + m[1], tag: 'import' };
+  if ((m = s.match(/^export\s+default\s+(.+)$/))) return { note: '默认导出：' + m[1], tag: 'import' };
+  if ((m = s.match(/^export\s+(.+)$/))) return { note: '导出：' + m[1], tag: 'import' };
+  if ((m = s.match(/^(\w+(?:\.\w+)*)\s*=(?!=)\s*(.+);?$/))) return { note: '把「' + m[2] + '」赋给 ' + m[1], tag: 'assign' };
+  if ((m = s.match(/^(\w+(?:\.\w+)*)\s*\(.*\)\s*;?$/))) return { note: '调用 ' + m[1] + '(...)', tag: 'call' };
+  return null;
+}
+
+function sqlRule(s) {
+  const u = s.toUpperCase();
+  if (u.startsWith('--')) return { note: '注释：' + s.replace(/^--+\s*/, ''), tag: 'comment' };
+  if (/^\s*SELECT\b/.test(u)) {
+    let note = '查询：取 ';
+    const cols = s.match(/SELECT\s+([\s\S]*?)(?:\s+FROM\b|$)/i);
+    if (cols) {
+      note += (cols[1].trim() === '*' ? '所有列' : '列 ' + cols[1].trim());
+      const tb = s.match(/FROM\s+(\w+)/i);
+      if (tb) note += '，来自表 ' + tb[1];
+    } else note += '数据';
+    return { note: note, tag: 'sql' };
+  }
+  if (/^\s*INSERT\b/.test(u)) {
+    const tb = s.match(/INTO\s+(\w+)/i);
+    return { note: '插入：往' + (tb ? '表 ' + tb[1] : '表') + '里加一行新数据', tag: 'sql' };
+  }
+  if (/^\s*UPDATE\b/.test(u)) {
+    const tb = s.match(/UPDATE\s+(\w+)/i), st = s.match(/SET\s+([\s\S]*?)\s+WHERE\b/i);
+    return { note: '更新：改' + (tb ? '表 ' + tb[1] : '表') + (st ? '里的 ' + st[1].trim() : '') + '（WHERE 指定改哪些行）', tag: 'sql' };
+  }
+  if (/^\s*DELETE\b/.test(u)) {
+    const tb = s.match(/FROM\s+(\w+)/i);
+    return { note: '删除：从' + (tb ? '表 ' + tb[1] : '表') + '里删掉满足 WHERE 条件的行', tag: 'sql' };
+  }
+  if (/^\s*CREATE\s+TABLE\b/.test(u)) {
+    const tb = s.match(/CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(\w+)/i);
+    return { note: '建表：新建' + (tb ? '表 ' + tb[1] : '一张表') + '，括号里是列名和类型', tag: 'sql' };
+  }
+  if (/^\s*FROM\s+(\w+)/.test(u)) {
+    const tb = s.match(/FROM\s+(\w+)/i);
+    return { note: '从表 ' + tb[1] + ' 里取数据', tag: 'sql' };
+  }
+  if (/^\s*(GROUP\s+BY|ORDER\s+BY|HAVING|WHERE|LIMIT|JOIN|ON|VALUES|SET)\b/.test(u)) return { note: 'SQL 子句：' + s.replace(/;$/, ''), tag: 'sql' };
+  return null;
+}
+
+function htmlRule(s) {
+  if (/^<!--/.test(s)) return { note: 'HTML 注释', tag: 'comment' };
+  let m;
+  if ((m = s.match(/^<(\/?)([a-zA-Z0-9-]+)/))) {
+    const info = DICT.web[m[2].toLowerCase()];
+    if (m[1]) return { note: (info ? info.zh + ' ' : '') + '标签结束：</' + m[2] + '>', tag: 'tag' };
+    return { note: (info ? '开始' + info.zh + '：' : '开始标签：') + '<' + m[2] + '>' + (info ? '（' + info.d + '）' : ''), tag: 'tag' };
+  }
+  if (s.trim()) return { note: '页面上的文字内容', tag: 'text' };
+  return null;
+}
+
+function cssRule(s) {
+  if (/^\/\*/.test(s)) return { note: '注释', tag: 'comment' };
+  let m;
+  if ((m = s.match(/^([^{}]+)\{\s*$/))) return { note: '选择器「' + m[1].trim() + '」：给匹配的元素设置样式', tag: 'prop' };
+  if (/^\}/.test(s)) return { note: '样式块结束', tag: 'prop' };
+  if ((m = s.match(/^([\w-]+)\s*:\s*(.+?);?$/))) {
+    const key = m[1].toLowerCase();
+    const info = DICT.web[key];
+    return { note: (info ? info.zh + '：' : '') + m[1] + ' = ' + m[2].replace(/;$/, ''), tag: 'prop' };
+  }
+  return null;
+}
+
+const RULE_FN = { python: pyRule, c: cRule, cpp: cRule, java: javaRule, js: jsRule, sql: sqlRule, html: htmlRule, css: cssRule };
+
+function explainLine(text, langId) {
+  const s = text.trim();
+  if (!s) return { note: '', tag: 'blank' };
+  const fn = RULE_FN[langId];
+  const r = fn ? fn(s) : null;
+  if (r) return r;
+  return { note: '这行执行：' + s, tag: 'stmt', fallback: true };
+}
+
+/* ================= 整体解释与关键字 ================= */
+const STEP_TEXT = {
+  import: '导入需要的模块/头文件', func: '定义函数', 'class': '定义类', input: '读取用户输入',
+  output: '输出结果', loop: '循环处理', cond: '做条件判断', assign: '给变量赋值',
+  return: '返回结果', call: '调用函数/方法', with: '打开并管理资源', try: '处理异常',
+  jump: '中断/跳过循环', sql: '执行 SQL 操作', tag: '编写页面结构', prop: '设置样式'
+};
+
+function analyze(rawCode, langId) {
+  const tokenLines = tokenizeAll(rawCode, langId);
+  const lineTexts = tokenLines.map(ts => ts.map(t => t[1]).join(''));
+  const lineNotes = lineTexts.map(t => explainLine(t, langId));
+  const stats = {
+    total: lineTexts.length,
+    code: lineTexts.filter(t => t.trim()).length,
+    blank: lineTexts.filter(t => !t.trim()).length
+  };
+  const funcs = [], classes = [];
+  lineTexts.forEach((t, idx) => {
+    const s = t.trim();
+    let m;
+    if (langId === 'python' && (m = s.match(/^def\s+(\w+)\s*\(([^)]*)\)/))) funcs.push({ name: m[1], args: m[2], line: idx + 1, sig: 'def ' + m[1] + '(' + m[2] + ')' });
+    else if (langId === 'java' && (m = s.match(/(?:public|private|protected)?\s*(?:static\s+)?(?:void|int|double|boolean|String)\s+(\w+)\s*\(([^)]*)\)\s*\{?$/))) funcs.push({ name: m[1], args: m[2], line: idx + 1, sig: m[1] + '(' + m[2] + ')' });
+    else if ((langId === 'c' || langId === 'cpp') && (m = s.match(/^(int|void|char|float|double|bool|long)\s+(\w+)\s*\(([^;]*)\)\s*\{?$/))) funcs.push({ name: m[2], args: m[3], line: idx + 1, sig: m[1] + ' ' + m[2] + '(' + m[3] + ')' });
+    else if (langId === 'js' && (m = s.match(/^function\s+(\w+)\s*\(([^)]*)\)/))) funcs.push({ name: m[1], args: m[2], line: idx + 1, sig: 'function ' + m[1] + '(' + m[2] + ')' });
+    if ((m = s.match(/^class\s+(\w+)/))) classes.push({ name: m[1], line: idx + 1 });
+  });
+  const tags = lineNotes.map(n => n.tag).filter(t => t !== 'blank' && t !== 'comment' && t !== 'return');
+  const steps = [];
+  tags.forEach(t => {
+    if (!STEP_TEXT[t]) return;
+    if (!steps.includes(STEP_TEXT[t])) steps.push(STEP_TEXT[t]);
+  });
+  const summaryParts = [];
+  summaryParts.push('这段 ' + langLabel(langId) + ' 代码共 ' + stats.total + ' 行，其中有效代码 ' + stats.code + ' 行。');
+  if (classes.length) summaryParts.push('定义了 ' + classes.length + ' 个类：' + classes.map(c => c.name).join('、') + '。');
+  if (funcs.length) summaryParts.push('定义了 ' + funcs.length + ' 个函数：' + funcs.map(f => f.name).join('、') + '。');
+  if (steps.length) summaryParts.push('主要流程是：' + steps.join(' → ') + '。');
+  return {
+    lang: langId,
+    stats,
+    summary: summaryParts.join(''),
+    steps: steps,
+    funcs,
+    classes,
+    lineTexts,
+    lineNotes,
+    tokenLines,
+    keywords: collectKeywords(tokenLines, langId)
+  };
+}
+
+function collectKeywords(tokenLines, langId) {
+  const map = new Map();
+  const KIND = { kw: '关键字', bi: '内置', ty: '类型', op: '运算符', tag: '标签', attr: '属性', prop: '属性' };
+  const OP_WHITELIST = ['=', '==', '!=', '<=', '>=', '+', '-', '*', '/', '%', '**', '//', '+=', '-='];
+  tokenLines.forEach((ts, idx) => {
+    ts.forEach(([t, v]) => {
+      if (!KIND[t]) return;
+      if (t === 'op' && !OP_WHITELIST.includes(v)) return;
+      if ((t === 'tag' || t === 'attr' || t === 'prop') && v.length < 1) return;
+      const key = v;
+      if (!map.has(key)) map.set(key, { term: v, type: t, count: 0, lines: [] });
+      const it = map.get(key);
+      it.count++;
+      if (it.lines[it.lines.length - 1] !== idx + 1) it.lines.push(idx + 1);
+    });
+  });
+  return [...map.values()]
+    .map(it => Object.assign(it, { kind: KIND[it.type] }))
+    .sort((a, b) => b.count - a.count || a.term.localeCompare(b.term));
+}
+
+function dictKey(langId) {
+  if (langId === 'c' || langId === 'cpp') return 'c_cpp';
+  if (langId === 'js') return 'js_ts';
+  if (langId === 'html' || langId === 'css') return 'web';
+  return langId;
+}
+
+function lookup(term, langId) {
+  const ld = DICT[dictKey(langId)] || {};
+  if (ld[term]) return ld[term];
+  if (DICT.common[term]) return DICT.common[term];
+  const lower = term.toLowerCase();
+  for (const k in ld) if (k.toLowerCase() === lower) return ld[k];
+  for (const k in DICT.common) if (k.toLowerCase() === lower) return DICT.common[k];
+  return null;
+}
+
+/* ================= UI ================= */
+function escapeHtml(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function renderTokens(tokens) {
+  return tokens.map(([t, v]) => '<span class="tok-' + t + '">' + escapeHtml(v) + '</span>').join('');
+}
+
+const SAMPLE = [
+  '# 判断一个数是不是偶数',
+  'def is_even(n):',
+  '    if n % 2 == 0:',
+  '        return True',
+  '    else:',
+  '        return False',
+  '',
+  'def main():',
+  '    num = int(input("请输入一个整数："))',
+  '    if is_even(num):',
+  '        print(num, "是偶数")',
+  '    else:',
+  '        print(num, "是奇数")',
+  '',
+  'if __name__ == "__main__":',
+  '    main()'
+].join('\n');
+
+const $ = id => document.getElementById(id);
+let lastResult = null;
+
+function currentLang(code) {
+  const sel = $('lang').value;
+  if (sel !== 'auto') return sel;
+  return detectLanguage(code);
+}
+
+function doExplain() {
+  const code = $('code').value;
+  if (!code.trim()) {
+    lastResult = null;
+    $('detectInfo').textContent = '';
+    $('tab-overall').innerHTML = '<div class="empty">代码是空的，先贴一段进来。</div>';
+    $('tab-lines').innerHTML = '<div class="empty">还没解释。</div>';
+    $('tab-keywords').innerHTML = '<div class="empty">还没解释。</div>';
+    return;
+  }
+  const auto = $('lang').value === 'auto';
+  const langId = currentLang(code);
+  $('detectInfo').textContent = '识别为 ' + langLabel(langId) + '（' + (auto ? '自动' : '手动指定') + '）';
+  const res = analyze(code, langId);
+  lastResult = res;
+  renderAll(res, auto);
+}
+
+function renderAll(res, auto) {
+  renderOverall(res);
+  renderLines(res);
+  renderKeywords(res);
+}
+
+function renderOverall(res) {
+  const html = [];
+  html.push('<div class="summary-card">' + escapeHtml(res.summary) + '</div>');
+  if (res.steps.length) {
+    html.push('<h3 class="sec">主要步骤</h3><ol class="steps">');
+    res.steps.forEach((s, i) => { html.push('<li>' + escapeHtml(s) + '</li>'); });
+    html.push('</ol>');
+  }
+  const defs = [];
+  res.classes.forEach(c => defs.push({ line: c.line, sig: 'class ' + c.name, kind: '类' }));
+  res.funcs.forEach(f => defs.push({ line: f.line, sig: f.sig, kind: '函数' }));
+  if (defs.length) {
+    html.push('<h3 class="sec">定义清单</h3><div class="func-list">');
+    defs.sort((a, b) => a.line - b.line).forEach(d => {
+      html.push('<div class="func-item"><span class="ln">第 ' + d.line + ' 行</span><span>' + d.kind + '：</span><code>' + escapeHtml(d.sig) + '</code></div>');
+    });
+    html.push('</div>');
+  }
+  html.push('<p class="muted" style="font-size:12.5px;margin-top:14px">共 ' + res.stats.total + ' 行 · 有效 ' + res.stats.code + ' 行 · 空行 ' + res.stats.blank + ' 行</p>');
+  $('tab-overall').innerHTML = html.join('');
+}
+
+function renderLines(res) {
+  const html = [];
+  res.tokenLines.forEach((ts, idx) => {
+    const n = res.lineNotes[idx];
+    const note = n.note;
+    html.push('<div class="line-card">');
+    html.push('<div class="code-row"><span class="lineno">' + (idx + 1) + '</span><span class="code-body">' + renderTokens(ts) + '</span></div>');
+    if (n.tag === 'blank') {
+      html.push('<div class="note"><span class="tag">空行</span><span class="fallback">（空行，用来分段）</span></div>');
+    } else if (note) {
+      html.push('<div class="note"><span class="tag">' + (TAG_LABEL[n.tag] || '说明') + '</span><span' + (n.fallback ? ' class="fallback"' : '') + '>' + escapeHtml(note) + '</span></div>');
+    }
+    html.push('</div>');
+  });
+  $('tab-lines').innerHTML = html.join('');
+}
+
+function renderKeywords(res) {
+  const html = [];
+  if (!res.keywords.length) {
+    $('tab-keywords').innerHTML = '<div class="empty">这段代码里没有可识别的关键字。</div>';
+    return;
+  }
+  html.push('<p class="muted" style="font-size:12.5px;margin:0 0 10px">共 ' + res.keywords.length + ' 个词，点开看含义。</p>');
+  html.push('<div class="kw-list">');
+  res.keywords.forEach(k => {
+    const info = lookup(k.term, res.lang);
+    html.push('<div class="kw-item">');
+    html.push('<div class="kw-head"><code>' + escapeHtml(k.term) + '</code><span class="kind">' + k.kind + '</span>');
+    if (info) html.push('<span class="zh">' + escapeHtml(info.zh) + '</span>');
+    else html.push('<span class="zh kw-miss">（词典未收录）</span>');
+    html.push('<span class="cnt">×' + k.count + ' · 第 ' + k.lines.slice(0, 6).join(',') + (k.lines.length > 6 ? '…' : '') + ' 行</span></div>');
+    html.push('<div class="kw-body">');
+    if (info) {
+      html.push('<p>' + escapeHtml(info.d) + '</p>');
+      if (info.ex) html.push('<pre>' + escapeHtml(info.ex) + '</pre>');
+      html.push('<p><a href="' + escapeHtml(info.doc || docUrl(res.lang, k.term)) + '" target="_blank" rel="noopener">查官方文档</a></p>');
+    } else {
+      html.push('<p class="kw-miss">离线词典暂时没有这个词的解释。</p>');
+    }
+    html.push('</div></div>');
+  });
+  html.push('</div>');
+  $('tab-keywords').innerHTML = html.join('');
+}
+
+function docUrl(langId, term) {
+  const d = LANGS[langId] || {};
+  return d.doc || 'https://www.bing.com/search?q=' + encodeURIComponent(langLabel(langId) + ' ' + term);
+}
+
+// 事件绑定
+document.querySelectorAll('nav.tabs button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('nav.tabs button').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+  });
+});
+$('btnExplain').addEventListener('click', doExplain);
+$('btnSample').addEventListener('click', () => { $('code').value = SAMPLE; doExplain(); });
+$('btnClear').addEventListener('click', () => { $('code').value = ''; doExplain(); });
+$('lang').addEventListener('change', () => { if ($('code').value.trim()) doExplain(); });
+$('code').addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); doExplain(); }
+});
+$('tab-keywords').addEventListener('click', e => {
+  const item = e.target.closest('.kw-item');
+  if (item) item.classList.toggle('open');
+});
+
+// 启动
+$('code').value = SAMPLE;
+doExplain();
+
+// PWA：注册 Service Worker（只在 https / localhost 下生效，file:// 打开时静默跳过）
+if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
+  window.addEventListener('load', function () {
+    navigator.serviceWorker.register('sw.js').catch(function () {});
+  });
+}
+</script>
+</body>
+</html>
