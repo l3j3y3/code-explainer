@@ -1,0 +1,98 @@
+name: Android APK
+
+# 网页改了或 app 壳改了，就打一个新 APK 挂到 Release 上；手机点开 Release 页直接装
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'app/**'
+      - 'index.html'
+      - 'manifest.json'
+      - 'sw.js'
+      - 'icons/**'
+      - '.github/workflows/android.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-apk
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install npm deps
+        working-directory: app
+        run: npm ci --no-audit --no-fund
+
+      - name: Stage web assets + cap sync
+        working-directory: app
+        run: |
+          node scripts/stage.mjs
+          npx cap sync android
+
+      # 优先用仓库 Secret 里的签名；没有 Secret 就用仓库里那把公开的玩具 keystore（见 app/android/app/README-signing.md）
+      - name: Prepare signing keystore
+        run: |
+          set -e
+          if [ -n "$SECRET_KS_B64" ]; then
+            echo "$SECRET_KS_B64" | base64 -d > "$RUNNER_TEMP/release.p12"
+            KS="$RUNNER_TEMP/release.p12"
+            echo "用 Secret 里的签名"
+          else
+            KS="$GITHUB_WORKSPACE/app/android/app/keystore.p12"
+            echo "用仓库内的签名（公开玩具钥匙）"
+          fi
+          echo "KEYSTORE_PATH=$KS" >> "$GITHUB_ENV"
+        env:
+          SECRET_KS_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+
+      - name: Build release APK
+        working-directory: app/android
+        env:
+          APP_VERSION_NAME: ${{ github.run_number }}.0
+          APP_VERSION_CODE: ${{ github.run_number }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD != '' && secrets.KEYSTORE_PASSWORD || 'codeexplainer' }}
+          KEY_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD != '' && secrets.KEYSTORE_PASSWORD || 'codeexplainer' }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS != '' && secrets.KEY_ALIAS || 'codeexplainer' }}
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon --stacktrace assembleRelease
+
+      - name: Verify APK
+        run: |
+          set -e
+          APK=$(find app/android/app/build/outputs/apk/release -name '*.apk' | head -1)
+          echo "APK=$APK" >> "$GITHUB_ENV"
+          AAPT=$(ls -d /usr/local/lib/android/sdk/build-tools/*/aapt2 2>/dev/null | tail -1)
+          APKSIGNER=$(ls -d /usr/local/lib/android/sdk/build-tools/*/apksigner 2>/dev/null | tail -1)
+          "$AAPT" dump badging "$APK" | head -6
+          if [ -n "$APKSIGNER" ]; then "$APKSIGNER" verify --print-certs "$APK" | head -4; fi
+
+      - name: Rename APK
+        run: cp "$APK" "code-explainer-app-${{ github.run_number }}.apk"
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="v${{ github.run_number }}"
+          gh release create "$TAG" "code-explainer-app-${{ github.run_number }}.apk" \
+            --title "代码解释器 app v${{ github.run_number }}" \
+            --notes "手机点下面的 APK 直接装（首次要允许「安装未知应用」）。离线可用；AI 通道要自己在设置里填 DeepSeek key。" \
+            --latest

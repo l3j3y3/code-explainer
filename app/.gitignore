@@ -1,0 +1,9 @@
+# app 壳工程的忽略规则
+node_modules/
+dist/
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/.idea/
+*.log
