@@ -1,8 +1,8 @@
 {
-  "version": "1.3.0",
-  "build": 8,
+  "version": "1.4.0",
+  "build": 9,
   "apk": "apk/code-explainer.apk",
-  "notes": "feat: AI 详解改成当面讲的口气；思考档位做成设置项，默认不额外花钱",
+  "notes": "feat: 块内整块源码、算法类型识别、离线纠错、狂暴档、从手机文件夹读代码",
   "feedback": {
     "issues": false,
     "repo": "l3j3y3/code-explainer"
