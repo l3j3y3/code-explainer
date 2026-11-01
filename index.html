@@ -306,6 +306,32 @@
     border: 1px solid var(--border); background: var(--bg); font-size: 14px;
   }
 
+  /* ---------- AI 状态条 / 来源标 ---------- */
+  .taskbar { flex: 0 0 auto; background: var(--accent-soft); border-bottom: 1px solid var(--border); font-size: 12.5px; }
+  .taskbar .task { display: flex; align-items: center; gap: 8px; padding: 6px 12px; }
+  .taskbar .task + .task { border-top: 1px solid var(--border); }
+  .taskbar .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex: 0 0 auto; animation: aipulse 1s ease-in-out infinite; }
+  @keyframes aipulse { 50% { opacity: .25; } }
+  .taskbar .lab { flex: 1 1 auto; color: var(--text); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .taskbar .cancel {
+    flex: 0 0 auto; height: 26px; padding: 0 10px; border-radius: 13px; border: 1px solid var(--border);
+    background: var(--panel); color: var(--muted); font-size: 12px;
+  }
+  .chip.ai.on { box-shadow: 0 0 0 2px var(--accent-soft); }
+  .chip.ai.busy::after {
+    content: ''; width: 6px; height: 6px; border-radius: 50%;
+    background: currentColor; animation: aipulse 1s ease-in-out infinite;
+  }
+  .overall-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 0 10px; font-size: 12.5px; }
+  .summary-card .src-tag, .lint-item .src {
+    display: inline-block; margin-left: 6px; padding: 0 5px; border-radius: 5px; font-size: 10.5px;
+    background: #dafbe1; color: #1a7f37; font-weight: 600; vertical-align: 1px;
+  }
+  .algo-src {
+    margin: 8px 0 0; font-size: 12px; color: var(--muted);
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  }
+
   /* ============ 抽屉 / 遮罩 ============ */
   .mask { position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 20; }
   .sheet {
@@ -423,6 +449,8 @@
     </div>
   </header>
 
+  <div class="taskbar" id="taskbar" hidden></div>
+
   <main class="views">
     <section id="view-code" class="view active">
       <div class="editor-wrap">
@@ -454,7 +482,7 @@
         <div class="filters">
           <button data-filter="all" class="active">全部</button>
           <button data-filter="noted">只看要点</button>
-          <button id="btnAiLines" class="btn small">AI 补全没讲的行</button>
+          <button id="btnAiLines" class="btn small">AI 重讲全部行</button>
           <button id="btnLint" class="btn small">纠错</button>
         </div>
         <div class="lint-bar" id="lintBar" hidden></div>
@@ -2414,7 +2442,6 @@ let lastResult = null;
 let currentView = 'code';
 let currentResultView = 'overall';
 let lineFilter = 'all';
-let aiRun = null;
 let gutterCount = -1;
 const nativePlatform = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
 const TAG_LABEL_AI = Object.assign({}, typeof TAG_LABEL !== 'undefined' ? TAG_LABEL : {}, { ai: 'AI' });
@@ -2504,6 +2531,7 @@ function updateLangChip(res) {
   if (!el) return;
   el.classList.remove('unsure');
   if (!res) { el.textContent = '识别：—'; return; }
+  if (res.aiLang) { el.textContent = 'AI：' + langLabel(res.lang); return; }
   if (!res.autoLang) { el.textContent = '手动：' + langLabel(res.lang); return; }
   if (res.lang === 'plain') { el.textContent = '没认出语言 · 看候选'; el.classList.add('unsure'); return; }
   if (!res.confident) {
@@ -2524,8 +2552,17 @@ function setFilterCounts(total, noted) {
 /* 算法卡单独成一块：解析器回来时只刷它，不动整页 */
 function algoCardHtml(res) {
   const algos = (res && res.algo) || [];
+  const fromAi = !!(res && res.algoSource === 'ai');
+  const src = fromAi
+    ? '<p class="algo-src">来源：AI 按语义判断的（它也可能看错，对一眼代码结构）' +
+      (res.algoOffline ? '<button class="btn small" data-algo-offline="1">看离线猜的</button>' : '') + '</p>'
+    : '<p class="muted" style="font-size:12px;margin:6px 0 0">' + escapeHtml((res && res.tsOk)
+        ? '按语法结构认的，换变量名不影响；但逻辑对不对它看不出来。'
+        : '按写法关键词猜的，换了变量名可能就认不出（语法分析器还没就绪）。') + '</p>';
   if (!algos.length) {
-    return '<div class="algo-card"><span class="muted">没看出典型算法——可能就是普通逻辑，或者写法跟常见套路不一样。</span></div>';
+    return '<div class="algo-card"><span class="muted">' +
+      (fromAi ? 'AI 也没看出典型算法——大概就是普通逻辑。' : '没看出典型算法——可能就是普通逻辑，或者写法跟常见套路不一样。') +
+      '</span>' + (fromAi ? src : '') + '</div>';
   }
   const top = algos[0];
   const second = algos[1];
@@ -2533,12 +2570,10 @@ function algoCardHtml(res) {
   if (second && (top.score - second.score) / Math.max(top.score, 1) < 0.2) {
     title = '可能是 ' + top.name + '，也可能是 ' + second.name;
   }
-  const note = (res && res.tsOk)
-    ? '按语法结构认的，换变量名不影响；但逻辑对不对它看不出来。'
-    : '按写法关键词猜的，换了变量名可能就认不出（语法分析器还没就绪）。';
+  if (res && res.algoAlt) title += '（也可能是 ' + res.algoAlt + '）';
   return '<div class="algo-card"><div class="algo-name">' + escapeHtml(title) + '</div>' +
-    '<ul class="algo-why">' + top.reasons.map(r => '<li>' + escapeHtml(r) + '</li>').join('') + '</ul>' +
-    '<p class="muted" style="font-size:12px;margin:6px 0 0">' + escapeHtml(note) + '</p></div>';
+    '<ul class="algo-why">' + (top.reasons || []).map(r => '<li>' + escapeHtml(r) + '</li>').join('') + '</ul>' +
+    src + '</div>';
 }
 
 function renderAlgoCard(res) {
@@ -2548,7 +2583,15 @@ function renderAlgoCard(res) {
 
 function renderOverall(res) {
   const html = [];
-  html.push('<div class="summary-card">' + escapeHtml(res.summary) + '</div>');
+  if (AI.ready()) {
+    html.push('<div class="overall-tools">' +
+      '<button class="btn small" data-ai-fix="1">AI 校正结论</button>' +
+      '<span class="muted">' + (res.aiApplied
+        ? '算法 / 纠错 / 总结已经是 AI 看过的'
+        : '算法和纠错是离线规则猜的，点一下就换成 AI 的判断') + '</span></div>');
+  }
+  html.push('<div class="summary-card">' + escapeHtml(res.summary) +
+    (res.summarySource === 'ai' ? '<span class="src-tag">AI</span>' : '') + '</div>');
   html.push('<h3 class="sec">算法类型</h3><div id="algoCard">' + algoCardHtml(res) + '</div>');
   const defBlocks = res.blocks.filter(b => b.kind === 'def');
   const defs = [];
@@ -2630,7 +2673,8 @@ function renderLintBar(res) {
     host.classList.add('ok');
     host.classList.remove('open');
     let why;
-    if (res && res.tsOk) why = '语法解析过了，没发现语法错；逻辑对不对得看运行结果';
+    if (res && res.lintSource === 'ai') why = 'AI 也看过了，没发现明显问题';
+    else if (res && res.tsOk) why = '语法解析过了，没发现语法错；逻辑对不对得看运行结果';
     else if (TS.failed) why = '语法解析器没加载上，只做了基础检查';
     else if (TSLANG[lang]) why = '基础检查没问题；语法解析器就绪后会再看一遍';
     else why = '这类语言只做基础检查';
@@ -2643,12 +2687,13 @@ function renderLintBar(res) {
   const html = [];
   html.push('<div class="lint-head" data-toggle-lint="1">' +
     '<span>' + (errors ? errors + ' 处错误' : '没错误') + (list.length - errors ? ' · ' + (list.length - errors) + ' 处提醒' : '') + '</span>' +
-    '<span class="muted">' + (lintOpen ? '收起' : '点开看') + '</span></div>');
+    '<span class="muted">' + (res && res.lintSource === 'ai' ? 'AI 看过 · ' : '') + (lintOpen ? '收起' : '点开看') + '</span></div>');
   html.push('<div class="lint-list">');
   list.forEach(it => {
     html.push('<div class="lint-item ' + it.severity + '" data-jump="' + it.line + '">' +
       '<span class="ln">第 ' + it.line + ' 行</span>' +
       '<span class="msg">' + escapeHtml(it.msg) + '</span>' +
+      (it.from === 'ai' ? '<span class="src">AI</span>' : '') +
       (it.hint ? '<span class="hint">' + escapeHtml(it.hint) + '</span>' : '') +
       '</div>');
   });
@@ -2829,10 +2874,11 @@ const AI = {
     const v = LS.get('ce.aithink', 'off');
     return v === 'low' || v === 'high' || v === 'rage' ? v : 'off';
   },
-  ready() { return this.on() && !!this.key(); }
+  ready() { return this.on() && !!this.key(); },
+  setEnabled(v) { LS.set('ce.aion', v ? '1' : '0'); }
 };
 // 改了提示词就 +1：缓存 key 里带着它，老用户不会读到旧的硬文案
-const PROMPT_VER = 2;
+const PROMPT_VER = 3;
 const AI_USAGE = {
   get total() { return parseInt(LS.get('ce.aitok', '0'), 10) || 0; },
   session: 0,
@@ -2862,11 +2908,65 @@ function aiCacheSet(kind, code, extra, text) {
   const all = aiCacheAll();
   all[aiCacheKey(kind, code, extra)] = text;
   const keys = Object.keys(all);
-  while (keys.length > 24) delete all[keys.shift()];
+  while (keys.length > 48) delete all[keys.shift()];
   LS.set('ce.aicache', JSON.stringify(all));
 }
 
-class AIError extends Error {}
+class AIError extends Error {
+  constructor(msg, kind, extra) {
+    super(msg);
+    this.name = 'AIError';
+    this.kind = kind || 'net';
+    if (extra) Object.assign(this, extra);
+  }
+}
+
+/* 三种超时分开算：憋着不回 / 回一半断气 / 整次太长。
+   实测反馈「一直转圈不报错」就是因为原来这三条一条都没有。 */
+const AI_TUNING = {
+  firstByteMs: 25000,
+  firstByteThinkMs: 45000,
+  idleMs: 30000,
+  totalMs: 180000,
+  retryMs: 700,
+  attempts: 2
+};
+function aiTune() {
+  // 测试注入点：window.__CE_AI_TUNE = { firstByteMs: 60 }
+  return Object.assign({}, AI_TUNING, window.__CE_AI_TUNE || {});
+}
+const sleepMs = ms => new Promise(r => setTimeout(r, ms));
+
+/* 每个 AI 动作一个 controller，互不掐架。
+   原来是全局一个 aiRun：点「追问」会把正在跑的详解 abort 掉。 */
+const AI_JOBS = new Map();
+function aiJobAbort(id) {
+  const c = AI_JOBS.get(id);
+  if (!c) return false;
+  AI_JOBS.delete(id);
+  try { c.abort(); } catch (e) {}
+  return true;
+}
+function aiJobStart(id) {
+  aiJobAbort(id);
+  const c = new AbortController();
+  AI_JOBS.set(id, c);
+  return c;
+}
+function aiJobEnd(id, ctrl) {
+  if (AI_JOBS.get(id) === ctrl) AI_JOBS.delete(id);
+}
+function stopAI(id) {
+  const ids = id ? [id] : [...AI_JOBS.keys()];
+  ids.forEach(x => aiJobAbort(x));
+}
+function linkSignal(external) {
+  const c = new AbortController();
+  if (!external) return c;
+  if (external.aborted) { c.abort(external.reason); return c; }
+  external.addEventListener('abort', () => c.abort(external.reason), { once: true });
+  return c;
+}
 
 async function aiErrorText(resp) {
   let detail = '';
@@ -2889,53 +2989,91 @@ async function aiErrorText(resp) {
   return base + (detail ? '：' + detail : '');
 }
 
-async function readSSE(resp, onDelta, onReason) {
-  const reader = resp.body.getReader();
-  const dec = new TextDecoder();
-  let buf = '', out = '', rea = '';
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buf += dec.decode(value, { stream: true });
-    let idx;
-    while ((idx = buf.indexOf('\n\n')) >= 0) {
-      const chunk = buf.slice(0, idx);
-      buf = buf.slice(idx + 2);
-      for (const line of chunk.split('\n')) {
-        if (line.slice(0, 5) !== 'data:') continue;
-        const payload = line.slice(5).trim();
-        if (!payload || payload === '[DONE]') continue;
-        let j;
-        try { j = JSON.parse(payload); } catch (e) { continue; }
-        if (j.usage) AI_USAGE.add(j.usage);
-        const d = j.choices && j.choices[0] && j.choices[0].delta;
-        // 思考内容只用来提示「正在想」，不进正文
-        if (d && d.reasoning_content) {
-          rea += d.reasoning_content;
-          if (onReason) onReason(rea);
-        }
-        if (d && d.content) {
-          out += d.content;
-          if (onDelta) onDelta(out);
-        }
-      }
-    }
-  }
-  return out;
+// 响应头的错误：分类清楚，好让人知道是「再点一次」还是「去设置看看」
+async function aiErrorFromResp(resp) {
+  const msg = await aiErrorText(resp);
+  const s = resp.status;
+  let kind = 'http';
+  if (s === 401 || s === 403) kind = 'auth';
+  else if (s === 402) kind = 'quota';
+  else if (s === 429) kind = 'rate';
+  else if (s >= 500) kind = 'server';
+  const e = new AIError(msg, kind);
+  // 参数错、Key 错、余额不足：重试没用，别浪费你的钱
+  e.fatal = kind === 'auth' || kind === 'quota' || kind === 'http';
+  return e;
 }
 
-async function aiChat(opts) {
-  const key = AI.key();
-  if (!key) throw new AIError('还没填 API Key：右上「⋯」→ 设置 / AI 通道');
-  const think = opts.think === undefined ? AI.think() : opts.think;
+function sseNormalize(s) {
+  return String(s || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+}
+
+/* 增量 SSE 解析：兼容 CRLF、跨 chunk 断行、: keep-alive 心跳、[DONE] */
+function createSSE(onDelta, onReason) {
+  let buf = '', text = '', rea = '', gotAny = false, finished = false;
+  const eat = raw => {
+    for (const line of raw.split('\n')) {
+      if (!line || line.charAt(0) === ':') continue;   // 心跳注释行
+      if (line.slice(0, 5) !== 'data:') continue;
+      const payload = line.slice(5).trim();
+      if (!payload) continue;
+      if (payload === '[DONE]') { finished = true; continue; }
+      let j;
+      try { j = JSON.parse(payload); } catch (e) { continue; }
+      if (j.usage) AI_USAGE.add(j.usage);
+      const d = j.choices && j.choices[0] && j.choices[0].delta;
+      // 思考内容只用来提示「正在想」，不进正文
+      if (d && d.reasoning_content) {
+        rea += d.reasoning_content;
+        if (onReason) onReason(rea);
+      }
+      if (d && d.content) {
+        gotAny = true;
+        text += d.content;
+        if (onDelta) onDelta(text);
+      }
+    }
+  };
+  return {
+    feed(chunk) {
+      if (!chunk) return;
+      buf = sseNormalize(buf + chunk);
+      let idx;
+      while ((idx = buf.indexOf('\n\n')) >= 0) {
+        eat(buf.slice(0, idx));
+        buf = buf.slice(idx + 2);
+      }
+    },
+    end() {
+      if (buf.trim()) eat(buf);
+      buf = '';
+      return { text: text, reason: rea, gotAny: gotAny, finished: finished };
+    }
+  };
+}
+
+function parseJsonLoose(text) {
+  const t = stripFence(text);
+  if (!t) return null;
+  try { return JSON.parse(t); } catch (e) {}
+  // 模型有时前后多讲一句人话，把最外层那对花括号抠出来再试
+  const a = t.indexOf('{');
+  const b = t.lastIndexOf('}');
+  if (a >= 0 && b > a) {
+    try { return JSON.parse(t.slice(a, b + 1)); } catch (e) {}
+  }
+  return null;
+}
+
+function aiBody(opts, think, streaming) {
   const body = {
     model: opts.model || AI.model(),
     messages: opts.messages,
     max_tokens: opts.maxTokens || 800,
-    stream: !!opts.stream
+    stream: streaming
   };
   if (opts.json) body.response_format = { type: 'json_object' };
-  if (opts.stream) body.stream_options = { include_usage: true };
+  if (streaming) body.stream_options = { include_usage: true };
   // 官方文档（思考模式）：thinking 默认开、effort 默认 high；
   // 思考模式下 temperature/presence_penalty/frequency_penalty 不生效，传了只是噪音，所以不传。
   if (think !== 'off') {
@@ -2945,39 +3083,167 @@ async function aiChat(opts) {
     body.thinking = { type: 'disabled' };
     body.temperature = opts.temperature === undefined ? 0.6 : opts.temperature;
   }
+  return body;
+}
+
+/* 发一次。返回 { 文本 }，失败抛带 kind 的 AIError；
+   出过字再断的，错误上带 gotBytes / partial，好让人接着讲。 */
+async function aiOnce(opts, streaming) {
+  const key = AI.key();
+  const tune = aiTune();
+  const think = opts.think === undefined ? AI.think() : opts.think;
+  const body = aiBody(opts, think, streaming);
+  const ctl = linkSignal(opts.signal);
+  let wd = null;
+  let idleTimer = null, firstTimer = null, totalTimer = null;
+  const clearAll = () => {
+    clearTimeout(firstTimer);
+    clearTimeout(idleTimer);
+    clearTimeout(totalTimer);
+  };
+  const stop = msg => {
+    if (ctl.signal.aborted) return;
+    wd = new AIError(msg, 'timeout');
+    try { ctl.abort(wd); } catch (e) {}
+  };
+  const firstMs = streaming ? (think === 'off' ? tune.firstByteMs : tune.firstByteThinkMs) : tune.totalMs;
+  const secs = ms => Math.max(1, Math.round(ms / 1000));
+  firstTimer = setTimeout(() => stop('等了 ' + secs(firstMs) + ' 秒服务器一个字都没回（网络断了或者太堵），点「重试」再来一次'), firstMs);
+  totalTimer = setTimeout(() => stop('这次请求超过 ' + secs(tune.totalMs) + ' 秒还没完，先停下来了'), tune.totalMs);
+  const touch = () => {
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => stop('连接断了：' + secs(tune.idleMs) + ' 秒没收到新内容'), tune.idleMs);
+  };
+  touch();
+
   let resp;
   try {
     resp = await fetch(AI.base() + '/chat/completions', {
       method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: 'Bearer ' + key },
+      headers: Object.assign(
+        { 'content-type': 'application/json', authorization: 'Bearer ' + key },
+        streaming ? { accept: 'text/event-stream' } : {}
+      ),
       body: JSON.stringify(body),
-      signal: opts.signal
+      signal: ctl.signal,
+      cache: 'no-store'
     });
   } catch (e) {
-    if (e && e.name === 'AbortError') throw e;
-    throw new AIError('网络不通，先看看 Wi-Fi；离线解释照旧能用');
+    clearAll();
+    if (wd) throw wd;
+    if (ctl.signal.reason instanceof AIError) throw ctl.signal.reason;
+    if (e && e.name === 'AbortError') {
+      const ae = new AIError('已停止', 'aborted');
+      ae.name = 'AbortError';
+      throw ae;
+    }
+    throw new AIError('请求没发出去：网络断了或者被拦了（离线解释照旧能用），点「重试」再试一次', 'net');
   }
-  if (!resp.ok) throw new AIError(await aiErrorText(resp));
-  if (!opts.stream) {
-    const j = await resp.json();
-    if (j.usage) AI_USAGE.add(j.usage);
-    const m = j.choices && j.choices[0] && j.choices[0].message;
-    return (m && m.content) || '';
+  clearTimeout(firstTimer);
+  if (!resp.ok) {
+    clearAll();
+    throw await aiErrorFromResp(resp);
   }
-  return readSSE(resp, opts.onDelta, opts.onReason);
+
+  if (!streaming) {
+    let j = null;
+    try {
+      j = await resp.json();
+    } catch (e) {
+      clearAll();
+      if (wd) throw wd;
+      throw new AIError('服务器回的内容看不懂（可能被代理改了），点「重试」再试一次', 'format');
+    }
+    clearAll();
+    if (wd) throw wd;
+    if (j && j.usage) AI_USAGE.add(j.usage);
+    const m = j && j.choices && j.choices[0] && j.choices[0].message;
+    const text = (m && m.content) || '';
+    if (!text) {
+      const e2 = new AIError('模型这次没返回内容，点「重试」再试一次', 'empty');
+      e2.empty = true;
+      throw e2;
+    }
+    if (opts.onDelta) opts.onDelta(text);
+    return text;
+  }
+
+  const sse = createSSE(opts.onDelta, opts.onReason);
+  let cut = null;
+  try {
+    if (!resp.body || typeof resp.body.getReader !== 'function') {
+      // 个别 WebView 不给 body 流，整段拿回来解
+      sse.feed(await resp.text());
+      touch();
+    } else {
+      const reader = resp.body.getReader();
+      const dec = new TextDecoder();
+      for (;;) {
+        const r = await reader.read();
+        if (r.done) break;
+        touch();
+        sse.feed(dec.decode(r.value, { stream: true }));
+      }
+      sse.feed(dec.decode());
+    }
+  } catch (e) {
+    cut = e;
+  }
+  const got = sse.end();
+  clearAll();
+  if (wd) { wd.gotBytes = got.gotAny; wd.partial = got.text; throw wd; }
+  if (ctl.signal.reason instanceof AIError) {
+    const r = ctl.signal.reason;
+    r.gotBytes = got.gotAny;
+    r.partial = got.text;
+    throw r;
+  }
+  if (cut) {
+    if (cut.name === 'AbortError') {
+      const ae = new AIError('已停止', 'aborted');
+      ae.name = 'AbortError';
+      ae.gotBytes = got.gotAny;
+      ae.partial = got.text;
+      throw ae;
+    }
+    const ne = new AIError('讲到一半连接断了（已经出来的字留着），点「接着讲」接着来', 'net');
+    ne.gotBytes = got.gotAny;
+    ne.partial = got.text;
+    throw ne;
+  }
+  if (!got.text) {
+    const e3 = new AIError('这次一个字都没讲出来（模型没返回内容），换成非流式再来一次', 'empty');
+    e3.empty = true;
+    throw e3;
+  }
+  return got.text;
 }
 
-function stopAI() {
-  if (aiRun) {
-    try { aiRun.abort(); } catch (e) {}
-    aiRun = null;
+/* 对外的入口：超时 / 重试 / 流式空手退回非流式，都在这里兜 */
+async function aiChat(opts) {
+  if (!AI.key()) throw new AIError('还没填 API Key：右上「⋯」→ 设置 / AI 通道', 'auth');
+  const tune = aiTune();
+  // 流式一个字节都没拿到时，退成非流式再发一次：有些网络会把 SSE 掐掉
+  const modes = opts.stream ? [true, false] : [false];
+  let lastErr = null;
+  for (let m = 0; m < modes.length; m++) {
+    for (let attempt = 1; attempt <= tune.attempts; attempt++) {
+      try {
+        return await aiOnce(opts, modes[m]);
+      } catch (e) {
+        if (e && e.name === 'AbortError') throw e;
+        lastErr = e || new AIError('请求失败', 'net');
+        if (lastErr.fatal) throw lastErr;
+        const retryable = lastErr.kind === 'net' || lastErr.kind === 'timeout' ||
+          lastErr.kind === 'server' || lastErr.kind === 'rate';
+        // 已经出过字的不重来（重来会重复），交给「接着讲」
+        if (!retryable || lastErr.gotBytes || attempt >= tune.attempts) break;
+        await sleepMs(tune.retryMs * attempt);
+      }
+    }
+    if (lastErr && (lastErr.fatal || lastErr.gotBytes)) throw lastErr;
   }
-}
-function newAbort() {
-  stopAI();
-  const c = new AbortController();
-  aiRun = c;
-  return c;
+  throw lastErr || new AIError('请求失败', 'net');
 }
 
 /* 提示词 */
@@ -3004,16 +3270,33 @@ function ensureAiOverall() {
       '</div>' +
       '<div class="ai-out" id="aiOut"></div>' +
       '<div class="ai-note" id="aiNote">用 DeepSeek 现场讲一遍，比离线规则更懂语义。</div>' +
+      '<div class="ai-actions" id="aiActions"><button class="btn small" id="aiRetry" hidden>重试</button></div>' +
       '<div class="ai-chat" id="aiChat"></div>' +
       '<div class="ask-row"><input id="askInput" placeholder="追问一句：这段代码有什么坑？" autocomplete="off"><button class="btn primary small" id="askSend">问</button></div>' +
     '</div>';
-  $('aiRun').addEventListener('click', runOverallAI);
-  $('aiStop').addEventListener('click', () => { stopAI(); $('aiStop').hidden = true; $('aiRun').disabled = false; });
+  $('aiRun').addEventListener('click', () => runOverallAI());
+  $('aiStop').addEventListener('click', () => {
+    stopAI('overall');
+    $('aiStop').hidden = true;
+    $('aiRun').disabled = false;
+  });
+  $('aiRetry').addEventListener('click', () => {
+    runOverallAI({ mode: $('aiRetry').textContent === '接着讲' ? 'resume' : 'retry' });
+  });
   $('askSend').addEventListener('click', sendAsk);
   $('askInput').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); sendAsk(); } });
 }
 
-async function runOverallAI() {
+function overallAskText() {
+  return '先用一句话说清这段代码想干什么。然后按它执行的顺序讲关键几步，讲到哪一行就提哪一行（写成「第 3 行」，不要编行号）。最后说这段代码最容易踩的坑，或者新手最容易看错的地方。250 到 500 字，像当面讲。不要列提纲，不要「首先其次最后」，不要空话。';
+}
+
+// 断流时留在屏上的半截，用来「接着讲」
+let overallPartial = '';
+let overallAutoResumed = 0;
+
+async function runOverallAI(opts) {
+  let mode = (opts && opts.mode) || 'start';
   if (!AI.ready()) { openSettings(); return; }
   const code = $('code').value.trim();
   if (!code) { toast('先粘代码'); setView('code'); return; }
@@ -3021,22 +3304,41 @@ async function runOverallAI() {
   const out = $('aiOut');
   const note = $('aiNote');
   const runBtn = $('aiRun');
-  const cached = aiCacheGet('overall', code, '');
-  $('aiStop').hidden = true;
-  if (cached) {
-    out.textContent = cached;
-    note.textContent = '这一段是之前算过、直接读的缓存，没有再花钱。';
-    runBtn.textContent = '重新生成';
-    return;
+  const retryBtn = $('aiRetry');
+  if (mode === 'start') {
+    const cached = aiCacheGet('overall', code, '');
+    if (cached) {
+      out.textContent = cached;
+      note.textContent = '这一段是之前算过、直接读的缓存，没有再花钱。';
+      note.classList.remove('ai-err');
+      retryBtn.hidden = true;
+      runBtn.textContent = '重新生成';
+      overallPartial = '';
+      return;
+    }
+    overallAutoResumed = 0;
+    overallPartial = '';
   }
-  const ctrl = newAbort();
+  if (mode === 'resume' && !overallPartial) mode = 'retry';
+  const partial = mode === 'resume' ? overallPartial : '';
+  const ctrl = aiJobStart('overall');
   runBtn.disabled = true;
   $('aiStop').hidden = false;
-  const rage0 = AI.think() === 'rage';
-  note.textContent = rage0 ? '狂暴模式：准备中（顶配模型 + 强思考，比普通档贵好几倍）…' : '正在生成…';
+  retryBtn.hidden = true;
+  const tier = AI.think();
+  const rage = tier === 'rage';
+  const rageModel = 'deepseek-v4-pro';
+  const baseUser = '语言：' + langLabel(currentLang(code)) + '\n代码：\n```\n' + code + '\n```\n';
   note.classList.remove('ai-err');
-  out.textContent = '';
-  out.innerHTML = '<span class="ai-cursor">●</span>';
+  if (partial) {
+    out.textContent = partial + '\n';
+    note.textContent = '接着上面往下讲…';
+  } else {
+    out.textContent = '';
+    out.innerHTML = '<span class="ai-cursor">●</span>';
+    note.textContent = rage ? '狂暴模式：准备中（顶配模型 + 强思考，比普通档贵好几倍）…' : '正在生成…';
+  }
+  TASK.set('overall', partial ? 'AI 详解接着讲…' : 'AI 详解生成中…');
   // 思考档位下正文会晚到一大截，用计时告诉人它没死
   const t0 = Date.now();
   let thinkTimer = null;
@@ -3052,14 +3354,10 @@ async function runOverallAI() {
     tick();
     thinkTimer = setInterval(tick, 1000);
   };
-  const tier = AI.think();
-  const rage = tier === 'rage';
-  const rageModel = 'deepseek-v4-pro';
-  const baseUser = '语言：' + langLabel(currentLang(code)) + '\n代码：\n```\n' + code + '\n```\n';
   let text = '';
   try {
     let outline = '';
-    if (rage) {
+    if (rage && !partial) {
       // 第一轮只拆结构：算法、复杂度、关键步骤、坑。第二轮拿着它写讲解，比一次憋出来稳。
       note.textContent = '狂暴模式（' + rageModel + ' + 强思考 · 第 1/2 轮）：先拆结构和坑…';
       outline = await aiChat({
@@ -3075,108 +3373,209 @@ async function runOverallAI() {
       });
       note.textContent = '狂暴模式（第 2/2 轮）：写讲解…';
     }
+    const msgs = partial
+      ? [
+          { role: 'system', content: sysBase() },
+          { role: 'user', content: baseUser + overallAskText() },
+          { role: 'assistant', content: partial },
+          { role: 'user', content: '接着上面往下讲，别重复已经说过的内容，直接接着说。' }
+        ]
+      : [
+          { role: 'system', content: sysBase() },
+          { role: 'user', content: baseUser +
+            (outline ? '先看一遍刚才拆出来的结构（JSON）：\n' + outline + '\n\n' : '') + overallAskText() }
+        ];
     text = await aiChat({
       stream: true,
       think: tier,
       model: rage ? rageModel : undefined,
       maxTokens: rage ? 2000 : 1400,
       signal: ctrl.signal,
-      messages: [
-        { role: 'system', content: sysBase() },
-        { role: 'user', content: baseUser +
-          (outline ? '先看一遍刚才拆出来的结构（JSON）：\n' + outline + '\n\n' : '') +
-          '先用一句话说清这段代码想干什么。然后按它执行的顺序讲关键几步，讲到哪一行就提哪一行（写成「第 3 行」，不要编行号）。最后说这段代码最容易踩的坑，或者新手最容易看错的地方。250 到 500 字，像当面讲。不要列提纲，不要「首先其次最后」，不要空话。' }
-      ],
+      messages: msgs,
       onReason: startThinkClock,
       onDelta: all => {
         stopThinkClock();
         note.textContent = rage ? '狂暴模式 · 这一段用的是 ' + rageModel + '（比普通档贵）' : '';
-        out.textContent = all;
+        out.textContent = (partial ? partial + '\n' : '') + all;
       }
     });
-    out.textContent = text || '（模型这次没返回内容，点「重新生成」再试一次）';
-    if (text) aiCacheSet('overall', code, '', text);
+    const full = (partial ? partial + '\n' : '') + text;
+    out.textContent = full || '（模型这次没返回内容，点「重新生成」再试一次）';
+    if (full) { aiCacheSet('overall', code, '', full); overallPartial = ''; }
     note.textContent = '';
     runBtn.textContent = '重新生成';
   } catch (e) {
-    if (e && e.name === 'AbortError') {
-      out.textContent = (text || '') + '\n\n（已停止）';
+    const errText = (e && e.message) || '出错了';
+    if (e && e.name === 'AbortError' && !(e && e.gotBytes)) {
+      out.textContent = (partial ? partial + '\n' : '') + (text || '') + '\n\n（已停止）';
       note.textContent = '已停止，已经出来的部分留着。';
-    } else {
-      out.textContent = text || '';
-      note.textContent = (e && e.message) || '出错了';
+      overallPartial = '';
+    } else if (e && e.gotBytes) {
+      // 讲到一半断了：留着半截，给「接着讲」；第一次断流自动接一次
+      overallPartial = (partial ? partial + '\n' : '') + (e.partial || text || '');
+      out.textContent = overallPartial;
+      note.textContent = errText;
       note.classList.add('ai-err');
+      retryBtn.textContent = '接着讲';
+      retryBtn.hidden = false;
+      if (overallAutoResumed < 1) {
+        overallAutoResumed++;
+        note.textContent = errText + '（自动接着讲一次…）';
+        setTimeout(() => { runOverallAI({ mode: 'resume' }); }, 300);
+      }
+    } else {
+      out.textContent = (partial ? partial + '\n' : '') + (text || '');
+      note.textContent = errText;
+      note.classList.add('ai-err');
+      retryBtn.textContent = '重试';
+      retryBtn.hidden = false;
+      overallPartial = '';
     }
   } finally {
     stopThinkClock();
-    aiRun = null;
+    aiJobEnd('overall', ctrl);
+    TASK.clear('overall');
     runBtn.disabled = false;
     $('aiStop').hidden = true;
   }
 }
 
-/* 2) 逐行 AI 补全 */
-function missingLines(res) {
-  const out = [];
-  res.lineTexts.forEach((t, i) => {
-    if (!t.trim()) return;
-    const n = res.lineNotes[i];
-    if (!n || n.fallback || !n.note) out.push(i + 1);
-  });
-  return out;
-}
+/* 2) 逐行全量重讲：不只是补没讲的行，规则讲过的也一起换掉（那股生硬味是这么来的） */
 function stripFence(s) {
   let t = String(s || '').trim();
   if (t.startsWith('```')) t = t.replace(/^```[a-zA-Z]*\s*/, '').replace(/```\s*$/, '');
   return t.trim();
 }
-async function runLinesAI() {
-  if (!AI.ready()) { openSettings(); return; }
-  const res = lastResult;
-  if (!res) { toast('先点「解释」'); return; }
-  const code = $('code').value.trim();
-  const todo = missingLines(res);
-  if (!todo.length) { toast('每一行都已经有说明了'); return; }
-  const cacheKeyExtra = todo.join(',');
-  const btn = $('btnAiLines');
-  const cached = aiCacheGet('lines', code, cacheKeyExtra);
-  if (cached) { applyAiLines(cached, res); toast('读到缓存，没花钱'); return; }
-  btn.disabled = true;
-  btn.textContent = 'AI 补全中…';
-  try {
-    const list = todo.map(n => n + ': ' + res.lineTexts[n - 1]).join('\n');
-    const text = await aiChat({
-      json: true,
-      think: 'off',
-      maxTokens: Math.min(2000, 200 + todo.length * 40),
-      messages: [
-        { role: 'system', content: sysBase() + '这次必须只输出一个 JSON 对象，形如 {"lines":[{"line":3,"note":"给变量 x 赋初值"}]}，不许有别的文字。' },
-        { role: 'user', content: '语言：' + langLabel(res.lang) + '\n下面是需要解释的行（行号: 代码）：\n' + list + '\n请给每一行一条不超过 30 个汉字的中文说明，只解释这一行在做什么。像给人划重点，别用「初始化」这种词硬套。' }
-      ]
-    });
-    applyAiLines(text, res);
-    aiCacheSet('lines', code, cacheKeyExtra, text);
-  } catch (e) {
-    toast((e && e.message) || 'AI 补全失败', 3200);
-  } finally {
-    btn.disabled = false;
-    btn.textContent = 'AI 补全没讲的行';
-  }
+const AI_LINE_BATCH = 60;   // 一次讲 60 行；再长模型容易串行、也更容易被网络掐
+const AI_LINE_MAX = 1200;   // 硬上限，超过就明说只讲了前 1200 行，不静默截断
+
+function recountNoted(res) {
+  res.notedCount = res.lineNotes.filter(n => lineIsNoted(n)).length;
+  return res.notedCount;
 }
-function applyAiLines(text, res) {
-  let data = null;
-  try { data = JSON.parse(stripFence(text)); } catch (e) { data = null; }
-  if (!data || !Array.isArray(data.lines)) { toast('AI 返回的格式没看懂，再点一次试试', 3000); return; }
+
+function aiLineTargets(res) {
+  const out = [];
+  res.lineTexts.forEach((t, i) => { if (t.trim()) out.push(i + 1); });
+  return out;
+}
+
+function blockTitleAt(res, lineNo) {
+  const b = (res.blocks || []).find(x => x.kind !== 'blank' && (x.from + 1) <= lineNo && lineNo <= (x.to + 1));
+  if (!b) return '';
+  if (b.kind === 'def') return b.label + ' ' + b.name;
+  if (b.kind === 'comment') return '注释';
+  return '语句块';
+}
+
+function applyAiLineNotes(res, items) {
   let n = 0;
-  data.lines.forEach(item => {
-    const ln = parseInt(item.line, 10);
-    const note = String(item.note || '').trim();
+  (items || []).forEach(item => {
+    const ln = parseInt(item && item.line, 10);
+    const note = String((item && item.note) || '').replace(/\s+/g, ' ').trim();
     if (!ln || !note || ln < 1 || ln > res.lineNotes.length) return;
     res.lineNotes[ln - 1] = { note: note, tag: 'ai' };
     n++;
   });
-  renderLines(res);
-  toast('AI 补了 ' + n + ' 行');
+  recountNoted(res);
+  return n;
+}
+
+async function replaceLinesAI() {
+  if (!AI.ready()) { openSettings(); return; }
+  const res = lastResult;
+  if (!res) { toast('先点「解释」'); return; }
+  const code = $('code').value.trim();
+  if (!code) { toast('先粘代码'); return; }
+  if (AI_JOBS.has('lines')) { toast('正在重讲，上面的进度条能取消'); return; }
+  const targets = aiLineTargets(res);
+  if (!targets.length) { toast('这段里没有能讲的行'); return; }
+  const todo = targets.slice(0, AI_LINE_MAX);
+  const cut = targets.length - todo.length;
+  const batches = [];
+  for (let i = 0; i < todo.length; i += AI_LINE_BATCH) batches.push(todo.slice(i, i + AI_LINE_BATCH));
+  const btn = $('btnAiLines');
+  const ctrl = aiJobStart('lines');
+  btn.disabled = true;
+  let cachedHits = 0, done = 0, failed = [];
+  try {
+    for (const batch of batches) {
+      if (ctrl.signal.aborted) break;
+      if (lastResult !== res) break;   // 代码换过了，别把旧结论贴到新页面上
+      done++;
+      const range = '第 ' + batch[0] + '–' + batch[batch.length - 1] + ' 行';
+      btn.textContent = 'AI 重讲中 ' + done + '/' + batches.length;
+      TASK.set('lines', 'AI 重讲逐行 ' + done + '/' + batches.length + (cut ? '（只讲前 ' + AI_LINE_MAX + ' 行）' : ''));
+      const extra = 'r' + batch[0] + '-' + batch[batch.length - 1];
+      let data = null;
+      const hit = aiCacheGet('lines2', code, extra);
+      if (hit) { cachedHits++; data = parseJsonLoose(hit); }
+      try {
+        if (!data) {
+          const text = await aiChat({
+            json: true,
+            think: 'off',
+            maxTokens: Math.min(2400, 300 + batch.length * 45),
+            signal: ctrl.signal,
+            messages: [
+              { role: 'system', content: lineSysPrompt() },
+              { role: 'user', content: lineUserPrompt(res, batch) }
+            ]
+          });
+          data = parseJsonLoose(text);
+          if (data) aiCacheSet('lines2', code, extra, JSON.stringify(data));
+        }
+        if (!data || !Array.isArray(data.lines)) throw new AIError('AI 这回没按格式回', 'format');
+        applyAiLineNotes(res, data.lines);
+        renderLines(res);
+      } catch (e) {
+        if (e && e.name === 'AbortError') break;
+        failed.push(range);
+      }
+    }
+    if (ctrl.signal.aborted) {
+      toast('停了，已经讲好的行留着', 2600);
+    } else if (failed.length) {
+      toast(failed.length + ' 批没成（' + failed.join('、') + '）；再点一次会只补没成的，已讲好的不重复花钱', 5200);
+    } else {
+      const lines = todo.length;
+      toast('AI 重讲了 ' + lines + ' 行' + (cachedHits ? '（其中 ' + cachedHits + ' 批读的缓存）' : '') +
+        (cut ? '；超过 ' + AI_LINE_MAX + ' 行，后面 ' + cut + ' 行没讲' : ''), 3600);
+    }
+  } finally {
+    aiJobEnd('lines', ctrl);
+    TASK.clear('lines');
+    btn.disabled = false;
+    btn.textContent = 'AI 重讲全部行';
+  }
+}
+
+/* 讲法：治「生硬」靠这几条硬约束，不靠形容词 */
+function lineSysPrompt() {
+  return sysBase() +
+    '这次你只干一件事：给每一行配一句说明。必须只输出一个 JSON 对象，形如 ' +
+    '{"lines":[{"line":3,"note":"让 x 从 0 开始计数"}]}，不许有别的文字。';
+}
+function lineUserPrompt(res, batch) {
+  const from = batch[0], to = batch[batch.length - 1];
+  const head = '语言：' + langLabel(res.lang) + '\n所在位置：' + (blockTitleAt(res, from) || '整段代码') + '\n';
+  const ctxLines = [];
+  for (let ln = Math.max(1, from - 2); ln < from; ln++) {
+    if (res.lineTexts[ln - 1] !== undefined) ctxLines.push(ln + ': ' + res.lineTexts[ln - 1]);
+  }
+  for (let ln = to + 1; ln <= Math.min(res.lineTexts.length, to + 2); ln++) {
+    ctxLines.push(ln + ': ' + res.lineTexts[ln - 1]);
+  }
+  const ctx = ctxLines.length ? '上下文（这几行不用讲，只帮你判断前后在干什么）：\n' + ctxLines.join('\n') + '\n\n' : '';
+  const rows = batch.map(ln => ln + ': ' + res.lineTexts[ln - 1]).join('\n');
+  return head + ctx + '要讲的行（行号: 代码）：\n' + rows + '\n\n' +
+    '每一行给一句中文说明，规则：\n' +
+    '1) 每句 12 到 30 个字，口语，像坐在旁边的人顺口说的。\n' +
+    '2) 必须点到这一行里的具体名字（变量、函数、类、字段），别写成「一个变量」。\n' +
+    '3) 不许用「初始化」「赋值语句」「遍历数组」「判断条件」这类模板词。\n' +
+    '4) 相邻的行别用同一种句式开头，别每句都以「这一行」起头。\n' +
+    '5) 行里有具体的值或边界（比如 i < n、x = 0），把值说出来。\n' +
+    '6) 只讲这一行在干什么，不要复述整块，不要编行号，不要多说别的。';
 }
 
 /* 3) 词条 AI 问一句 */
@@ -3233,7 +3632,7 @@ async function sendAsk() {
   bubble.textContent = '…';
   chat.appendChild(bubble);
   chat.scrollTop = chat.scrollHeight;
-  const ctrl = newAbort();
+  const ctrl = aiJobStart('dialog');
   try {
     const msgs = [{ role: 'system', content: sysBase() + '回答要短，围绕这段代码，最多 4 句话，说人话，别列条目。' }]
       .concat([{ role: 'user', content: '代码（' + langLabel(currentLang(code)) + '）：\n```\n' + code + '\n```' }])
@@ -3253,20 +3652,222 @@ async function sendAsk() {
     if (e && e.name === 'AbortError') bubble.textContent = '（已停止）';
     else bubble.textContent = (e && e.message) || '出错了';
   } finally {
-    aiRun = null;
+    aiJobEnd('dialog', ctrl);
   }
 }
 
+/* ---------- AI 校正：把离线猜错的算法 / 纠错 / 总结 / 语言换成 AI 的结论 ---------- */
+function fixSysPrompt() {
+  return '你是审代码的老手，负责复核一份离线规则猜出来的结论。' +
+    '只输出一个 JSON 对象，不要任何别的文字。没有把握的字段就保持原样，别为了显得聪明去改。';
+}
+function fixUserPrompt(code, res) {
+  const offline = {
+    language: res.lang,
+    algorithm: (res.algo && res.algo[0] && res.algo[0].name) || '无',
+    algorithm_why: (res.algo && res.algo[0] && res.algo[0].reasons) || [],
+    lint: (res.lint || []).slice(0, 12).map(x => ({ line: x.line, severity: x.severity, msg: x.msg })),
+    summary: res.summary
+  };
+  return '语言判断和代码：\n' + '推断语言：' + langLabel(res.lang) + '\n```\n' + code + '\n```\n\n' +
+    '离线规则给出的结论（可能有错，你是来复核的）：\n' + JSON.stringify(offline, null, 1) + '\n\n' +
+    '请输出这个对象，字段说明：\n' +
+    '{"language":"代码真正的语言，取值只能是 ' + Object.keys(LANGS).filter(x => x !== 'plain').join(' / ') + '",' +
+    '"algorithm":"这段代码真正的算法名（如 二分查找 / 动态规划 / 贪心 / 双指针 / 广度优先搜索 / 深度优先搜索 / 并查集 / 最短路 / 枚举；真看不出就写 无）",' +
+    '"algorithm_why":["为什么这么说，2 到 4 条，看结构不看变量名"],' +
+    '"algorithm_alt":"如果是另一种也说得通，写那个名字，没有就空字符串",' +
+    '"lint":[{"line": 行号, "severity": "error 或 warn", "msg": "一句话说清错在哪、怎么改"}],' +
+    '"lint_drop":[离线列表里判错了的行号],' +
+    '"summary":"一句话说清这段代码在干什么，40 字以内"}\n' +
+    'lint 里只写你在代码里真看到的错（越界、死循环、类型不对、逻辑反了这类离线规则看不出来的），没发现就写空数组 []。不要改语言以外的事实。';
+}
+
+let aiFixSeq = 0;
+async function runAiCorrection(pass) {
+  if (!AI.ready()) { openSettings(); return; }
+  const res = lastResult;
+  if (!res) return;
+  const code = $('code').value.trim();
+  if (!code) return;
+  const at = hash32(code);
+  const seq = ++aiFixSeq;
+  const ctrl = aiJobStart('fix');
+  TASK.set('fix', 'AI 正在校正结论（算法 / 纠错 / 总结）');
+  try {
+    let data = null;
+    const cached = aiCacheGet('fix', code, '');
+    if (cached) data = parseJsonLoose(cached);
+    if (!data) {
+      const text = await aiChat({
+        json: true,
+        think: 'off',
+        maxTokens: 900,
+        signal: ctrl.signal,
+        messages: [
+          { role: 'system', content: fixSysPrompt() },
+          { role: 'user', content: fixUserPrompt(code, res) }
+        ]
+      });
+      data = parseJsonLoose(text);
+      if (data) aiCacheSet('fix', code, '', JSON.stringify(data));
+    }
+    if (!data) throw new AIError('AI 回的格式没看懂，再点一次「AI 校正」试试', 'format');
+    if (seq !== aiFixSeq) return;
+    if (hash32($('code').value.trim()) !== at) {
+      toast('代码变了，这次的 AI 结论没贴上去（怕贴错）', 3400);
+      return;
+    }
+    if (lastResult !== res) return;   // 中途又点了「解释」，这份结论已经过期
+    await applyAiFix(data, res, pass || 0);
+  } catch (e) {
+    if (e && e.name === 'AbortError') return;
+    toast('AI 校正没成：' + ((e && e.message) || '不知道为啥'), 4000);
+  } finally {
+    aiJobEnd('fix', ctrl);
+    TASK.clear('fix');
+  }
+}
+
+async function applyAiFix(data, res, pass) {
+  if (!data || typeof data !== 'object') return;
+
+  // 1) 语言判错了：后面所有结论都跟着错，所以换语言、重算、再校正一遍（只一遍）
+  const lang = String(data.language || '').trim();
+  if (lang && lang !== 'plain' && LANGS[lang] && lang !== res.lang && pass < 1) {
+    const before = res.lang;
+    $('lang').value = lang;
+    saveCode();
+    doExplain(true);
+    if (lastResult) {
+      lastResult.aiLang = lang;
+      lastResult.aiApplied = true;
+      updateLangChip(lastResult);
+    }
+    toast('AI 看出来这是 ' + langLabel(lang) + '（离线判的是 ' + langLabel(before) + '），已经按它重讲；不对就点顶上的「识别」改回来', 4600);
+    await runAiCorrection(pass + 1);
+    return;
+  }
+
+  // 2) 算法
+  const name = String(data.algorithm || '').trim();
+  if (name) {
+    if (!res.algoOffline) res.algoOffline = (res.algo || []).slice();
+    if (name === '无' || name === 'none') {
+      res.algo = [];
+    } else {
+      res.algo = [{
+        id: 'ai',
+        name: name,
+        score: 99,
+        reasons: (Array.isArray(data.algorithm_why) ? data.algorithm_why : []).map(String).slice(0, 4),
+        from: 'ai'
+      }];
+    }
+    res.algoAlt = String(data.algorithm_alt || '').trim();
+    res.algoSource = 'ai';
+  }
+
+  // 3) 纠错：删掉 AI 说是误报的，补上它看见的
+  applyAiLint(res, data);
+
+  // 4) 总结
+  const sum = String(data.summary || '').replace(/\s+/g, ' ').trim();
+  if (sum && sum.length <= 160) {
+    if (!res.summaryOffline) res.summaryOffline = res.summary;
+    res.summary = sum;
+    res.summarySource = 'ai';
+  }
+
+  res.aiApplied = true;
+  renderOverall(res);
+  renderLintBar(res);
+  updateLangChip(res);
+}
+
+function applyAiLint(res, data) {
+  const n = res.lineTexts.length;
+  const drops = new Set(
+    (Array.isArray(data.lint_drop) ? data.lint_drop : [])
+      .map(x => parseInt(x, 10))
+      .filter(x => x > 0 && x <= n)
+  );
+  const list = (res.lint || []).filter(it => !drops.has(it.line));
+  const seen = new Set(list.map(it => it.line + '|' + it.severity));
+  let added = 0;
+  (Array.isArray(data.lint) ? data.lint : []).forEach(it => {
+    const line = parseInt(it && it.line, 10);
+    const msg = String((it && it.msg) || '').replace(/\s+/g, ' ').trim();
+    if (!line || line < 1 || line > n || !msg) return;
+    const sev = it.severity === 'warn' ? 'warn' : 'error';
+    const key = line + '|' + sev;
+    if (seen.has(key)) return;
+    seen.add(key);
+    list.push({ line: line, col: 0, severity: sev, msg: msg, hint: '', from: 'ai' });
+    added++;
+  });
+  if (drops.size || added) res.lintSource = 'ai';
+  res.lint = list.sort((a, b) => a.line - b.line).slice(0, 40);
+}
+
 /* ---------- AI 界面开关 ---------- */
+/* 进度条：AI 干活时在顶栏下面显示一行，能取消 */
+const TASK = {
+  list: [],
+  set(id, label) {
+    const i = this.list.findIndex(t => t.id === id);
+    if (i >= 0) this.list[i].label = label;
+    else this.list.push({ id: id, label: label });
+    renderTaskbar();
+  },
+  clear(id) {
+    const before = this.list.length;
+    this.list = this.list.filter(t => t.id !== id);
+    if (this.list.length !== before) renderTaskbar();
+  },
+  busy() { return this.list.length > 0; }
+};
+function syncChipBusy() {
+  const chip = $('btnAiChip');
+  if (!chip) return;
+  chip.classList.toggle('busy', TASK.busy());
+  const ready = AI.ready();
+  chip.title = TASK.busy()
+    ? 'AI 正在干活（下面的进度条能取消）'
+    : (ready ? 'AI 已开：点一下关掉' : 'AI 没开：点一下打开');
+}
+function renderTaskbar() {
+  const host = $('taskbar');
+  if (!host) return;
+  syncChipBusy();
+  if (!TASK.list.length) { host.hidden = true; host.innerHTML = ''; return; }
+  host.hidden = false;
+  host.innerHTML = TASK.list.map(t =>
+    '<div class="task"><span class="dot"></span><span class="lab">' + escapeHtml(t.label) + '</span>' +
+    '<button class="cancel" data-cancel="' + escapeHtml(t.id) + '">取消</button></div>'
+  ).join('');
+}
+
+let aiLastReady = null;
 function refreshAIUI() {
   const ready = AI.ready();
-  $('btnAiChip').classList.toggle('off', !ready);
-  $('btnAiChip').title = ready ? 'AI 已开启' : 'AI 未开启';
+  const chip = $('btnAiChip');
+  if (chip) {
+    chip.classList.toggle('off', !ready);
+    chip.classList.toggle('on', ready);
+  }
+  syncChipBusy();
   $('aiOverall').hidden = !ready;
   $('btnAiLines').hidden = !ready;
   if (ready) ensureAiOverall();
-  if (lastResult) renderKeywords(lastResult);
   updateUsageText();
+  if (aiLastReady !== ready) {
+    aiLastReady = ready;
+    // 只在「开 / 关」真的变了的时候重刷：进度条每跳一下都重刷会把词表的 AI 回答冲掉
+    if (lastResult) {
+      renderKeywords(lastResult);
+      renderOverall(lastResult);
+    }
+  }
 }
 
 /* ---------- 从文件夹读代码（只有 APK 有原生实现） ---------- */
@@ -3481,6 +4082,7 @@ function openSettings() {
   openSheet('sheetSettings');
 }
 function saveSettings() {
+  const wasReady = AI.ready();
   LS.set('ce.aion', $('aiOn').checked ? '1' : '0');
   LS.set('ce.aikey', $('aiKey').value.trim());
   LS.set('ce.aibase', $('aiBase').value.trim());
@@ -3489,6 +4091,9 @@ function saveSettings() {
   closeSheets();
   refreshAIUI();
   toast(AI.ready() ? 'AI 已开启' : (AI.on() ? '开了 AI，但还没填 Key' : 'AI 已关闭，纯离线'));
+  // 刚配上 / 刚打开：顺手把现有结论校正一遍，不用再跑去点
+  if (!wasReady && AI.ready() && lastResult) runAiCorrection().catch(() => {});
+  if (wasReady && !AI.ready() && lastResult && lastResult.aiApplied) doExplain(true);
 }
 
 /* ---------- 剪贴板 ---------- */
@@ -3768,10 +4373,40 @@ document.querySelectorAll('.filters button[data-filter]').forEach(btn => {
 });
 $('btnExplain').addEventListener('click', () => { saveCode(); doExplain(); setView('overall'); });
 $('btnPaste').addEventListener('click', pasteIntoCode);
-$('btnAiLines').addEventListener('click', runLinesAI);
+$('btnAiLines').addEventListener('click', replaceLinesAI);
+/* 顶上这颗 AI 就是开关：有 Key 时点一下开/关；没 Key 就直接去填 */
 $('btnAiChip').addEventListener('click', () => {
-  if (AI.ready()) { setView('overall'); ensureAiOverall(); }
-  else openSettings();
+  if (!AI.key()) {
+    openSettings();
+    toast('先填个 Key，存好之后点这颗 AI 就是开关了', 3200);
+    return;
+  }
+  const next = !AI.on();
+  AI.setEnabled(next);
+  refreshAIUI();
+  if (next) {
+    if (!lastResult && $('code').value.trim()) doExplain(true);
+    if (!lastResult) { setView('code'); toast('AI 已开；粘上代码点「解释」就会一起校正', 3000); return; }
+    setView('overall');
+    toast('AI 已开：先校正算法/纠错/总结，再把逐行全部重讲', 3200);
+    runAiCorrection().then(() => {
+      if (AI.ready() && lastResult) return replaceLinesAI();
+    }).catch(() => {});
+  } else {
+    stopAI();
+    TASK.list = [];
+    renderTaskbar();
+    toast('AI 已关，回到纯离线解释', 2600);
+    if (lastResult && lastResult.aiApplied) doExplain(true);
+  }
+});
+$('taskbar').addEventListener('click', e => {
+  const b = e.target.closest('[data-cancel]');
+  if (!b) return;
+  const id = b.dataset.cancel;
+  aiJobAbort(id);
+  TASK.clear(id);
+  toast('已经停下来了，做好的部分留着', 2400);
 });
 $('btnMore').addEventListener('click', () => openSheet('sheetMore'));
 $('btnLangGuess').addEventListener('click', () => {
@@ -3788,6 +4423,21 @@ $('langList').addEventListener('click', e => {
   if ($('code').value.trim()) doExplain();
 });
 $('tab-overall').addEventListener('click', e => {
+  if (e.target.closest('[data-ai-fix]')) {
+    if (!AI.ready()) { openSettings(); return; }
+    runAiCorrection();
+    return;
+  }
+  if (e.target.closest('[data-algo-offline]')) {
+    if (!lastResult || !lastResult.algoOffline) return;
+    lastResult.algo = lastResult.algoOffline.slice();
+    lastResult.algoOffline = null;
+    lastResult.algoSource = 'offline';
+    lastResult.algoAlt = '';
+    renderOverall(lastResult);
+    toast('换回离线猜的了', 2000);
+    return;
+  }
   if (!e.target.closest('[data-lang-fix]')) return;
   if (!lastResult) { toast('先粘代码、点一次「解释」'); return; }
   renderLangSheet(lastResult);
@@ -3976,7 +4626,7 @@ if (nativePlatform) {
 }
 
 /* ---------- 启动 ---------- */
-const APP_VERSION = '1.5.0';
+const APP_VERSION = '1.6.0';
 // 安全区由 CSS 变量 --safe-area-* 统一消费：浏览器里是 env() 兜底，
 // Android 壳里由 MainActivity 把系统栏尺寸写进行内样式（见那边注释）。
 // 这个 class 只留给诊断/样式钩子用，不再靠它压掉内边距。

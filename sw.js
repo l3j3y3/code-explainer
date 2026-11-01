@@ -1,4 +1,4 @@
-const CACHE = 'code-explainer-v8';
+const CACHE = 'code-explainer-v9';
 const ASSETS = ['./', './index.html', './manifest.json', './icons/icon-192.png', './icons/icon-512.png'];
 
 self.addEventListener('install', event => {
