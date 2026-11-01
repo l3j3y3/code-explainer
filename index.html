@@ -184,9 +184,13 @@
   .ln-block-head .nm { font-family: var(--mono); font-weight: 700; word-break: break-all; }
   .ln-gap { display: flex; align-items: center; gap: 8px; margin: 8px 2px; color: var(--muted); font-size: 11.5px; }
   .ln-gap::before, .ln-gap::after { content: ''; flex: 1 1 auto; height: 1px; background: var(--border); }
-  .ln-item { border-top: 1px solid var(--border); }
-  .ln-block-head + .ln-item { border-top: 0; }
+  .ln-item { display: flex; gap: 8px; align-items: baseline; padding: 6px 10px 7px; border-top: 1px solid var(--border); }
+  .ln-block-head + .ln-src + .ln-item { border-top: 0; }
   .ln-item.sel { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .ln-item .ln-no {
+    flex: 0 0 auto; width: 30px; text-align: right; color: var(--muted);
+    font-size: 11.5px; font-variant-numeric: tabular-nums; user-select: none;
+  }
   .ln-code {
     display: flex; background: var(--code-bg); color: var(--code-text);
     font-family: var(--mono); font-size: 13px; line-height: 1.7; overflow-x: auto; white-space: pre;
@@ -196,8 +200,54 @@
     color: #6e7681; user-select: none; border-right: 1px solid #333;
   }
   .ln-code .code-body { padding: 5px 10px; }
-  .ln-item.compact .ln-code .code-body { color: #8c959f; }
-  .ln-note { display: flex; gap: 8px; align-items: baseline; padding: 6px 10px 7px 48px; font-size: 13.5px; }
+  .ln-item.compact .ln-note { color: #8c959f; }
+  /* 块内整块源码：先把整块原文铺一遍，再看逐行解释；点解释行会高亮对应源码行 */
+  .ln-src {
+    background: var(--code-bg); color: var(--code-text);
+    font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+    overflow-x: auto; overflow-y: auto; max-height: 52vh;
+    white-space: pre; border-bottom: 1px solid var(--border);
+  }
+  .src-line { display: flex; min-width: max-content; }
+  .src-line .lineno {
+    flex: 0 0 auto; width: 38px; text-align: right; padding: 0 8px 0 6px;
+    color: #6e7681; user-select: none; border-right: 1px solid #333;
+  }
+  .src-line .code-body { padding: 0 10px; }
+  .src-line.hl { background: rgba(88,166,255,.22); }
+  .ln-block-head { cursor: pointer; }
+  .ln-block-head .fold { margin-left: auto; font-size: 11.5px; font-weight: 500; opacity: .85; }
+  .ln-block.folded .ln-src, .ln-block.folded .ln-item { display: none; }
+  .ln-note { display: flex; gap: 8px; align-items: baseline; flex: 1 1 auto; font-size: 13.5px; }
+  /* 纠错问题带 */
+  .lint-bar { border-bottom: 1px solid var(--border); background: var(--panel); font-size: 12.5px; }
+  .lint-bar.ok .lint-head { color: var(--muted); }
+  .lint-head { padding: 8px 12px; cursor: pointer; display: flex; gap: 8px; align-items: baseline; }
+  .lint-item {
+    display: flex; gap: 8px; align-items: baseline; padding: 6px 12px;
+    border-top: 1px solid var(--border); cursor: pointer;
+  }
+  .lint-item .ln { flex: 0 0 auto; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .lint-item .msg { flex: 1 1 auto; }
+  .lint-item .hint { flex: 1 1 100%; color: var(--muted); font-size: 11.5px; }
+  .lint-item.error .msg { color: #b42318; font-weight: 600; }
+  .lint-item.warn .msg { color: var(--warn); }
+  .lint-bar .lint-list { display: none; max-height: 40vh; overflow-y: auto; }
+  .lint-bar.open .lint-list { display: block; }
+  /* 算法类型卡 */
+  .algo-card { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; background: var(--panel); }
+  .algo-card .algo-name { font-size: 15px; font-weight: 700; color: var(--accent); }
+  .algo-why { margin: 6px 0 0; padding-left: 18px; color: var(--text); font-size: 13px; }
+  .algo-why li { margin: 2px 0; }
+  /* 文件夹 / 历史列表 */
+  .fs-list { max-height: 46vh; overflow-y: auto; margin: 4px 0 10px; }
+  .fs-item {
+    display: flex; gap: 10px; align-items: baseline; padding: 9px 10px;
+    border: 1px solid var(--border); border-radius: 9px; margin-bottom: 6px; background: var(--panel);
+  }
+  .fs-item:active { background: var(--accent-soft); }
+  .fs-item .nm { flex: 1 1 auto; word-break: break-all; font-size: 13.5px; }
+  .fs-item .meta { flex: 0 0 auto; color: var(--muted); font-size: 11.5px; }
   .ln-note .tag {
     flex: 0 0 auto; font-size: 11px; padding: 1px 6px; border-radius: 5px;
     background: var(--accent-soft); color: var(--accent); font-weight: 600;
@@ -405,7 +455,9 @@
           <button data-filter="all" class="active">全部</button>
           <button data-filter="noted">只看要点</button>
           <button id="btnAiLines" class="btn small">AI 补全没讲的行</button>
+          <button id="btnLint" class="btn small">纠错</button>
         </div>
+        <div class="lint-bar" id="lintBar" hidden></div>
         <div class="scroll" id="linesScroll"><div id="tab-lines"><div class="empty">还没解释。</div></div></div>
       </section>
 
@@ -439,12 +491,38 @@
 
 <div class="sheet" id="sheetMore" hidden>
   <button class="menu-item" id="miUpdate">检查更新</button>
+  <button class="menu-item" id="miFiles">从文件夹读代码</button>
+  <button class="menu-item" id="miHist">历史记录</button>
   <button class="menu-item" id="miPaste">粘贴剪贴板</button>
   <button class="menu-item" id="miCopy">复制代码</button>
   <button class="menu-item" id="miClear">清空代码</button>
   <button class="menu-item" id="miFeedback">反馈 / 提问题</button>
   <button class="menu-item" id="miSettings">设置 / AI 通道</button>
   <button class="menu-item" id="miAbout">关于</button>
+</div>
+
+<div class="sheet" id="sheetFiles" hidden>
+  <h3>从文件夹读代码</h3>
+  <p class="hint">软件只读这个文件夹，不往里写东西。点一个文件就载入并解释。</p>
+  <p class="hint" id="fsPath">还没选文件夹</p>
+  <div class="sheet-actions">
+    <button class="btn" id="fsPick">选文件夹</button>
+    <button class="btn" id="fsUp" hidden>上一层</button>
+  </div>
+  <div id="fsList" class="fs-list"></div>
+  <div class="sheet-actions">
+    <button class="btn primary" id="fsClose">关掉</button>
+  </div>
+</div>
+
+<div class="sheet" id="sheetHist" hidden>
+  <h3>历史记录</h3>
+  <p class="hint" id="histHint">只存在这台设备上。</p>
+  <div id="histList" class="fs-list"></div>
+  <div class="sheet-actions">
+    <button class="btn" id="histClear">清空记录</button>
+    <button class="btn primary" id="histClose">关掉</button>
+  </div>
 </div>
 
 <div class="sheet" id="sheetSettings" hidden>
@@ -475,6 +553,7 @@
       <option value="off">快（不思考，最省，默认）</option>
       <option value="low">细一点（多花约一半，多等 3 到 5 秒）</option>
       <option value="high">最细（多花两三倍，多等 5 到 10 秒）</option>
+      <option value="rage">狂暴（顶配模型 + 强思考 + 两轮，多花 5 到 8 倍）</option>
     </select>
   </div>
   <p class="hint" id="aiUsage"></p>
@@ -1690,6 +1769,158 @@ function buildBlocks(lineTexts, lineNotes, ranges) {
   return blocks;
 }
 
+/* ================= 算法类型（离线启发式） =================
+   宁可漏报也不乱猜：分不够高就不说，两个候选咬得紧就都说出来。 */
+function detectAlgorithms(rawCode, langId) {
+  const c = String(rawCode || '');
+  const hit = re => re.test(c);
+  const out = [];
+  const add = (id, name, score, reasons) => {
+    if (score >= 2) out.push({ id, name, score, reasons });
+  };
+
+  if (hit(/\bmid\b/) && hit(/\b(lo|low|left|begin)\b/i) && hit(/\b(hi|high|right|end)\b/i) && hit(/while|for|return/)) {
+    add('binary', '二分查找', 3 + (hit(/>>\s*1|mid\s*=\s*[^;]*\/\s*2/) ? 1 : 0),
+      ['拿 mid 从两头往中间收', 'lo / hi 各守一边']);
+  }
+  if (hit(/\bdp\s*\[/i) || hit(/\bmemo\s*\[/i) || hit(/\bf\s*\[\s*\w+\s*\]\s*\[/)) {
+    add('dp', '动态规划', 3 + (hit(/\bmax\s*\(|\bmin\s*\(/) ? 1 : 0) + (hit(/\[\s*\w+\s*\]\s*\[/) ? 1 : 0),
+      ['用表存中间结果，避免重复算', '有状态转移的写法']);
+  }
+  if ((hit(/\bsort\s*\(/) || hit(/\.sort\s*\(/)) && hit(/\b(best|ans|res|max|min)\b/)) {
+    add('greedy', '贪心', 3, ['先排序', '再一路挑当前看起来最好的']);
+  }
+  if (hit(/while\s*\(\s*\w+\s*<\s*\w+\s*\)/) && hit(/\b(i|left|l)\b/) && hit(/\b(j|right|r)\b/)) {
+    add('twoptr', '双指针', 2, ['两个下标各走一边']);
+  }
+  if (hit(/\b(left|low|l)\b/) && hit(/\b(right|high|r)\b/) && hit(/\b(left|low|l)\b\s*(\+\+|\+=|=\s*\w+\s*\+)/)) {
+    add('window', '滑动窗口', 2, ['有左右两端', '窗口会往里收']);
+  }
+  if (hit(/\b(queue|deque|q)\b/) && hit(/\b(push|append|offer|enqueue)\b/) && hit(/\b(poll|popleft|dequeue|front|pop)\b/) && hit(/\bvis(ited)?\b|\[.*\]\s*=\s*(1|true)/)) {
+    add('bfs', '广度优先搜索', 3, ['用队列一层层往外走', '拿 visited 记账，不重复走']);
+  }
+  if (hit(/dfs|backtrack/i) && hit(/\b(vis|visited|used|mark)\b/) && hit(/\b(return|= 0|= false)/)) {
+    add('dfs', '深度优先 / 回溯', 3, ['自己调自己往下钻', '钻回来会把标记撤销']);
+  }
+  if (hit(/\bparent\s*\[/) && hit(/\bfind\s*\(/) && hit(/parent\s*\[\s*\w+\s*\]\s*=\s*\w+/)) {
+    add('dsu', '并查集', 3, ['用 parent 数组存谁是老大', 'find 一路往上找根']);
+  }
+  if (hit(/\bdist\s*\[/) && hit(/dist\s*\[[^\]]+\]\s*[+=]/) && hit(/\bif\s*\(\s*dist/)) {
+    add('shortest', '最短路', 3, ['dist 存距离', '有不满足就更新的松弛写法']);
+  }
+  if (hit(/\b(stack)\b/) && hit(/\b(push|append)\b/) && hit(/\b(pop|top)\b/)) {
+    add('stack', '栈', 2, ['后进先出']);
+  }
+  // 递归：函数体里出现自己的名字（只做粗判）
+  const fnName = (c.match(/\b(?:def|function)\s+(\w+)\s*\(/) || [])[1];
+  if (fnName && new RegExp('\\b' + fnName + '\\s*\\(').test(c.slice(c.indexOf(fnName, c.indexOf(fnName) + 1) >= 0 ? c.indexOf(fnName) + fnName.length : c.length))) {
+    if (!hit(/\bmemo\s*\[|\bdp\s*\[/i)) add('recursion', '递归', 2, ['函数自己调自己']);
+  }
+  {
+    const loops = (c.match(/\bfor\s*\(/g) || []).length + (c.match(/\bwhile\s*\(/g) || []).length;
+    if (loops >= 3 && !out.length) add('bruteforce', '枚举 / 暴力', 2, ['套了好几层循环', '一个个试过去']);
+  }
+
+  out.sort((a, b) => b.score - a.score);
+  return out;
+}
+
+/* ================= 离线纠错 =================
+   只报能确定的：语义错误（死循环、越界）离线看不出来，交给人/AI。 */
+function stripCodeNoise(s) {
+  return String(s)
+    .replace(/"(?:\\.|[^"\\])*"/g, '""')
+    .replace(/'(?:\\.|[^'\\])*'/g, "''")
+    .replace(/`(?:\\.|[^`\\])*`/g, '``')
+    .replace(/\/\/.*$/, '')
+    .replace(/#.*$/, '');
+}
+
+function lintCode(rawCode, langId) {
+  const issues = [];
+  const lines = String(rawCode || '').split(/\r?\n/);
+  const MAX = 40;
+  const add = (line, col, severity, msg, hint) => {
+    if (issues.length >= MAX) return;
+    issues.push({ line, col: col || 0, severity, msg, hint: hint || '' });
+  };
+
+  // 1) 括号 / 引号配对：跳过字符串、行注释、块注释
+  const stack = [];
+  let inStr = null, inBlock = false;
+  for (let i = 0; i < lines.length; i++) {
+    const s = lines[i];
+    for (let k = 0; k < s.length; k++) {
+      const ch = s[k], nx = s[k + 1];
+      if (inBlock) { if (ch === '*' && nx === '/') { inBlock = false; k++; } continue; }
+      if (inStr) {
+        if (ch === '\\') { k++; continue; }
+        if (ch === inStr) inStr = null;
+        continue;
+      }
+      if (ch === '/' && nx === '/') break;
+      if (ch === '/' && nx === '*') { inBlock = true; k++; continue; }
+      if (ch === '#' && (langId === 'python' || langId === 'plain')) break;
+      if (ch === '"' || ch === "'" || ch === '`') { inStr = ch; continue; }
+      if (ch === '(' || ch === '[' || ch === '{') stack.push({ ch, line: i + 1, col: k + 1 });
+      else if (ch === ')' || ch === ']' || ch === '}') {
+        const want = ch === ')' ? '(' : ch === ']' ? '[' : '{';
+        const top = stack.pop();
+        if (!top || top.ch !== want) {
+          add(i + 1, k + 1, 'error', '这里的 ' + ch + ' 对不上',
+            top ? ('第 ' + top.line + ' 行那个 ' + top.ch + ' 还开着') : ('前面没有对应的 ' + want));
+        }
+      }
+    }
+  }
+  if (inStr) add(lines.length, 0, 'error', '字符串的 ' + inStr + ' 一直没关', '从这里开始一路到底都没闭合');
+  if (inBlock) add(lines.length, 0, 'error', '块注释没闭合', '缺一个 */');
+  stack.slice(-3).forEach(t => add(t.line, t.col, 'error', '这个 ' + t.ch + ' 一直开着', '到最后也没关上'));
+
+  // 2) 每行：中文标点、全角空格、if/while 里的单 =
+  const CJK = /[，。；：、（）【】「」『』“”‘’！？]/;
+  lines.forEach((s, i) => {
+    if (!s.trim()) return;
+    const code = stripCodeNoise(s);
+    const m = code.match(CJK);
+    if (m) add(i + 1, code.indexOf(m[0]) + 1, 'error', '中文「' + m[0] + '」混进代码了', '换成英文标点，编译器不认中文符号');
+    if (/\u3000/.test(code)) add(i + 1, code.indexOf('\u3000') + 1, 'warn', '这里有全角空格', '全角空格长得像空格，但不是，换成普通空格');
+    const cond = code.match(/\b(?:if|while)\s*\(([^)]*)\)/);
+    if (cond) {
+      const rest = cond[1].replace(/[=!<>+\-*/%&|^]=/g, '');
+      if (rest.indexOf('=') >= 0) {
+        add(i + 1, code.indexOf('=') + 1, 'error', '这里是判断，条件里只能有一个 =', '想比较要写 ==；写成一个 = 是把值赋进去，条件几乎永远成立');
+      }
+    }
+  });
+
+  // 3) tab / 空格缩进混用（整份文件层面，同层才会出问题，这里只提醒）
+  {
+    let tabs = 0, spaces = 0;
+    lines.forEach(s => { if (/^\t+/.test(s)) tabs++; else if (/^ {2,}/.test(s)) spaces++; });
+    if (tabs >= 1 && spaces >= 1) {
+      add(1, 0, 'warn', 'tab 和空格混着缩进', 'Python 会直接报错；别的语言看着也别扭，统一成一种');
+    }
+  }
+
+  // 4) C/Java/JS 行尾像少了分号
+  if (langId === 'c' || langId === 'cpp' || langId === 'java' || langId === 'js') {
+    lines.forEach((s, i) => {
+      const t = s.trim();
+      if (!t || t.startsWith('//') || t.startsWith('*') || t.startsWith('/*')) return;
+      if (/^(#|\}|\{|else\b|if\b|for\b|while\b|switch\b|case\b|default\b|do\b|try\b|catch\b|public\b|private\b|protected\b|class\b|import\b|package\b|using\b|namespace\b|template\b|typedef\b|struct\b|enum\b|return\b.*\{)/.test(t)) return;
+      if (/[;{}()\[\],:>+\-*/%&|=]$/.test(t)) return;
+      if (/<(?!<)\w*$/.test(t)) return;
+      const next = (lines[i + 1] || '').trim();
+      if (!next || /^[{.)\]}]/.test(next)) return;
+      if (/\w\s*$/.test(t)) add(i + 1, t.length, 'warn', '这行结尾像少了分号', '要是下一行是接着写的，那就是多行表达式，忽略这条');
+    });
+  }
+
+  issues.sort((a, b) => a.line - b.line);
+  return issues;
+}
+
 function analyze(rawCode, langId) {
   const tokenLines = tokenizeAll(rawCode, langId);
   const lineTexts = tokenLines.map(ts => ts.map(t => t[1]).join(''));
@@ -1745,6 +1976,8 @@ function analyze(rawCode, langId) {
     lineNotes,
     tokenLines,
     notedCount,
+    algo: detectAlgorithms(rawCode, langId),
+    lint: lintCode(rawCode, langId),
     keywords: collectKeywords(tokenLines, langId)
   };
 }
@@ -1794,6 +2027,13 @@ const LS = {
   set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} },
   del(k) { try { localStorage.removeItem(k); } catch (e) {} }
 };
+
+/* 纠错开关：离线检查，不花钱，默认开 */
+const LINT = {
+  on: () => LS.get('ce.lint', '1') === '1',
+  set(v) { LS.set('ce.lint', v ? '1' : '0'); }
+};
+let lintOpen = false;
 
 /* ---------- 小工具 ---------- */
 function escapeHtml(s) {
@@ -1904,6 +2144,7 @@ function doExplain(quiet) {
   lastResult.confident = det ? det.confident : true;
   renderAll(lastResult);
   updateLangChip(lastResult);
+  histRecordCode(code, langId);
   if (!quiet && auto && det && !det.confident) toast('这段代码像好几种语言，点顶上「识别」看候选', 2600);
 }
 function renderAll(res) {
@@ -1938,6 +2179,22 @@ function setFilterCounts(total, noted) {
 function renderOverall(res) {
   const html = [];
   html.push('<div class="summary-card">' + escapeHtml(res.summary) + '</div>');
+  // 算法类型：离线按写法猜，分咬得紧就把两个都说出来
+  const algos = res.algo || [];
+  html.push('<h3 class="sec">算法类型</h3>');
+  if (algos.length) {
+    const top = algos[0];
+    const second = algos[1];
+    let title = top.name;
+    if (second && (top.score - second.score) / Math.max(top.score, 1) < 0.2) {
+      title = '可能是 ' + top.name + '，也可能是 ' + second.name;
+    }
+    html.push('<div class="algo-card"><div class="algo-name">' + escapeHtml(title) + '</div>' +
+      '<ul class="algo-why">' + top.reasons.map(r => '<li>' + escapeHtml(r) + '</li>').join('') + '</ul>' +
+      '<p class="muted" style="font-size:12px;margin:6px 0 0">离线按写法猜的，拿不准会更正；要准可以点下面 AI 详解让它一起说。</p></div>');
+  } else {
+    html.push('<div class="algo-card"><span class="muted">没看出典型算法——可能就是普通逻辑，或者写法跟常见套路不一样。</span></div>');
+  }
   const defBlocks = res.blocks.filter(b => b.kind === 'def');
   const defs = [];
   res.classes.forEach(c => defs.push({ line: c.line, sig: 'class ' + c.name, kind: '类' }));
@@ -1986,7 +2243,7 @@ function renderLineItem(res, idx) {
   const noted = lineIsNoted(n);
   const html = [];
   html.push('<div class="ln-item' + (noted ? '' : ' compact') + '" data-line="' + (idx + 1) + '">');
-  html.push('<div class="ln-code"><span class="lineno">' + (idx + 1) + '</span><span class="code-body">' + renderTokens(res.tokenLines[idx] || []) + '</span></div>');
+  html.push('<span class="ln-no">' + (idx + 1) + '</span>');
   if (noted) {
     html.push('<div class="ln-note' + (n.tag === 'ai' ? ' ai' : '') + '">' +
       '<span class="tag">' + escapeHtml(TAG_LABEL_AI[n.tag] || '说明') + '</span>' +
@@ -1994,13 +2251,53 @@ function renderLineItem(res, idx) {
   } else if (n && n.note) {
     // 规则没覆盖到：只给一句淡色的保守说明，不冒充正经解释（「只看要点」里会被筛掉）
     html.push('<div class="ln-note"><span class="fallback">' + escapeHtml(n.note) + '</span></div>');
+  } else {
+    html.push('<div class="ln-note"><span class="fallback">这一行还没讲</span></div>');
   }
   html.push('</div>');
   return html.join('');
 }
 
+function lineSrcHtml(res, idx) {
+  return '<div class="src-line" data-line="' + (idx + 1) + '">' +
+    '<span class="lineno">' + (idx + 1) + '</span>' +
+    '<span class="code-body">' + renderTokens(res.tokenLines[idx] || []) + '</span></div>';
+}
+
+function renderLintBar(res) {
+  const host = $('lintBar');
+  if (!host) return;
+  if (!LINT.on()) { host.hidden = true; host.innerHTML = ''; return; }
+  host.hidden = false;
+  const list = (res && res.lint) || [];
+  if (!list.length) {
+    host.classList.add('ok');
+    host.classList.remove('open');
+    host.innerHTML = '<div class="lint-head">没查出明显问题 · <span class="muted">离线只看基础错误，语义问题得让 AI 看</span></div>';
+    return;
+  }
+  host.classList.remove('ok');
+  host.classList.toggle('open', lintOpen);
+  const errors = list.filter(x => x.severity === 'error').length;
+  const html = [];
+  html.push('<div class="lint-head" data-toggle-lint="1">' +
+    '<span>' + (errors ? errors + ' 处错误' : '没错误') + (list.length - errors ? ' · ' + (list.length - errors) + ' 处提醒' : '') + '</span>' +
+    '<span class="muted">' + (lintOpen ? '收起' : '点开看') + '</span></div>');
+  html.push('<div class="lint-list">');
+  list.forEach(it => {
+    html.push('<div class="lint-item ' + it.severity + '" data-jump="' + it.line + '">' +
+      '<span class="ln">第 ' + it.line + ' 行</span>' +
+      '<span class="msg">' + escapeHtml(it.msg) + '</span>' +
+      (it.hint ? '<span class="hint">' + escapeHtml(it.hint) + '</span>' : '') +
+      '</div>');
+  });
+  html.push('</div>');
+  host.innerHTML = html.join('');
+}
+
 function renderLines(res) {
   setFilterCounts(res.lineTexts.length, res.notedCount);
+  renderLintBar(res);
   const html = [];
   let rendered = 0;
   let capped = false;
@@ -2014,13 +2311,23 @@ function renderLines(res) {
     }
     const lines = b.lines.filter(i => lineFilter === 'all' || lineIsNoted(res.lineNotes[i]));
     if (!lines.length) return;
-    html.push('<div class="ln-block">');
-    if (b.kind === 'def') {
-      const rng = b.to > b.from ? '第 ' + (b.from + 1) + '–' + (b.to + 1) + ' 行' : '第 ' + (b.from + 1) + ' 行';
-      html.push('<div class="ln-block-head"><span class="rng">' + rng + '</span><span class="nm">' + escapeHtml(b.label + ' ' + b.name) + '</span></div>');
-    } else if (b.kind === 'comment') {
-      html.push('<div class="ln-block-head"><span class="rng">第 ' + (b.from + 1) + ' 行</span><span>注释</span></div>');
+    const rows = b.to - b.from + 1;
+    // 超长块默认折叠，免得一屏全是代码
+    const longBlock = rows > 200;
+    html.push('<div class="ln-block' + (longBlock ? ' folded' : '') + '">');
+    const rng = b.to > b.from ? '第 ' + (b.from + 1) + '–' + (b.to + 1) + ' 行' : '第 ' + (b.from + 1) + ' 行';
+    const title = b.kind === 'def' ? (b.label + ' ' + b.name)
+      : b.kind === 'comment' ? '注释' : '语句';
+    html.push('<div class="ln-block-head" data-rows="' + rows + '">' +
+      '<span class="rng">' + rng + '</span>' +
+      '<span class="nm">' + escapeHtml(title) + '</span>' +
+      '<span class="fold">' + (longBlock ? '展开 ' + rows + ' 行' : '折叠') + '</span></div>');
+    html.push('<div class="ln-src">');
+    for (let k = b.from; k <= b.to; k++) {
+      if (lineFilter === 'noted' && !lineIsNoted(res.lineNotes[k])) continue;
+      html.push(lineSrcHtml(res, k));
     }
+    html.push('</div>');
     for (const idx of lines) {
       if (rendered >= LINE_RENDER_LIMIT) { capped = true; break; }
       html.push(renderLineItem(res, idx));
@@ -2125,16 +2432,41 @@ function jumpToLine(ln) {
   setTimeout(() => card.classList.remove('sel'), 1400);
 }
 
+function syncLintBtn() {
+  const btn = $('btnLint');
+  if (!btn) return;
+  btn.textContent = LINT.on() ? '纠错' : '纠错关';
+}
+
+let lastHlEl = null;
+// 点解释行 → 上面整块源码里把对应那行点亮
+function highlightSrcLine(ln) {
+  const item = document.querySelector('.ln-item[data-line="' + ln + '"]');
+  if (!item) return;
+  const block = item.parentNode;
+  if (block.classList.contains('folded')) {
+    block.classList.remove('folded');
+    const fold = block.querySelector('.ln-block-head .fold');
+    if (fold) fold.textContent = '折叠';
+  }
+  const src = block.querySelector('.src-line[data-line="' + ln + '"]');
+  if (!src) return;
+  if (lastHlEl) lastHlEl.classList.remove('hl');
+  lastHlEl = src;
+  src.classList.add('hl');
+  src.scrollIntoView({ block: 'center', behavior: 'smooth' });
+}
+
 /* ---------- AI 通道 ---------- */
 const AI = {
   on: () => LS.get('ce.aion', '0') === '1',
   key: () => LS.get('ce.aikey', ''),
   base: () => (LS.get('ce.aibase', '') || 'https://api.deepseek.com').replace(/\/+$/, ''),
   model: () => LS.get('ce.aimodel', 'deepseek-flash'),
-  // 讲法档位：off = 不思考（默认，最省）/ low / high
+  // 讲法档位：off = 不思考（默认，最省）/ low / high / rage（顶配 + 两轮）
   think: () => {
     const v = LS.get('ce.aithink', 'off');
-    return v === 'low' || v === 'high' ? v : 'off';
+    return v === 'low' || v === 'high' || v === 'rage' ? v : 'off';
   },
   ready() { return this.on() && !!this.key(); }
 };
@@ -2236,7 +2568,7 @@ async function aiChat(opts) {
   if (!key) throw new AIError('还没填 API Key：右上「⋯」→ 设置 / AI 通道');
   const think = opts.think === undefined ? AI.think() : opts.think;
   const body = {
-    model: AI.model(),
+    model: opts.model || AI.model(),
     messages: opts.messages,
     max_tokens: opts.maxTokens || 800,
     stream: !!opts.stream
@@ -2247,7 +2579,7 @@ async function aiChat(opts) {
   // 思考模式下 temperature/presence_penalty/frequency_penalty 不生效，传了只是噪音，所以不传。
   if (think !== 'off') {
     body.thinking = { type: 'enabled' };
-    body.reasoning_effort = think;
+    body.reasoning_effort = think === 'rage' ? 'high' : think;
   } else {
     body.thinking = { type: 'disabled' };
     body.temperature = opts.temperature === undefined ? 0.6 : opts.temperature;
@@ -2339,7 +2671,8 @@ async function runOverallAI() {
   const ctrl = newAbort();
   runBtn.disabled = true;
   $('aiStop').hidden = false;
-  note.textContent = '正在生成…';
+  const rage0 = AI.think() === 'rage';
+  note.textContent = rage0 ? '狂暴模式：准备中（顶配模型 + 强思考，比普通档贵好几倍）…' : '正在生成…';
   note.classList.remove('ai-err');
   out.textContent = '';
   out.innerHTML = '<span class="ai-cursor">●</span>';
@@ -2358,18 +2691,47 @@ async function runOverallAI() {
     tick();
     thinkTimer = setInterval(tick, 1000);
   };
+  const tier = AI.think();
+  const rage = tier === 'rage';
+  const rageModel = 'deepseek-v4-pro';
+  const baseUser = '语言：' + langLabel(currentLang(code)) + '\n代码：\n```\n' + code + '\n```\n';
   let text = '';
   try {
+    let outline = '';
+    if (rage) {
+      // 第一轮只拆结构：算法、复杂度、关键步骤、坑。第二轮拿着它写讲解，比一次憋出来稳。
+      note.textContent = '狂暴模式（' + rageModel + ' + 强思考 · 第 1/2 轮）：先拆结构和坑…';
+      outline = await aiChat({
+        think: 'rage',
+        model: rageModel,
+        json: true,
+        maxTokens: 800,
+        signal: ctrl.signal,
+        messages: [
+          { role: 'system', content: '你是懂算法和代码审阅的人。只输出一个 JSON 对象，不要别的文字。' },
+          { role: 'user', content: baseUser + '先别写讲解，只把这个对象填出来：{"algorithm":"这段像什么算法，看不出来就写 无","complexity":"时间复杂度估计","structure":["按执行顺序的关键步骤，3 到 6 条"],"pitfalls":["最容易踩的坑，1 到 4 条"]}' }
+        ]
+      });
+      note.textContent = '狂暴模式（第 2/2 轮）：写讲解…';
+    }
     text = await aiChat({
       stream: true,
-      maxTokens: 1400,
+      think: tier,
+      model: rage ? rageModel : undefined,
+      maxTokens: rage ? 2000 : 1400,
       signal: ctrl.signal,
       messages: [
         { role: 'system', content: sysBase() },
-        { role: 'user', content: '语言：' + langLabel(currentLang(code)) + '\n代码：\n```\n' + code + '\n```\n先用一句话说清这段代码想干什么。然后按它执行的顺序讲关键几步，讲到哪一行就提哪一行（写成「第 3 行」，不要编行号）。最后说这段代码最容易踩的坑，或者新手最容易看错的地方。250 到 500 字，像当面讲。不要列提纲，不要「首先其次最后」，不要空话。' }
+        { role: 'user', content: baseUser +
+          (outline ? '先看一遍刚才拆出来的结构（JSON）：\n' + outline + '\n\n' : '') +
+          '先用一句话说清这段代码想干什么。然后按它执行的顺序讲关键几步，讲到哪一行就提哪一行（写成「第 3 行」，不要编行号）。最后说这段代码最容易踩的坑，或者新手最容易看错的地方。250 到 500 字，像当面讲。不要列提纲，不要「首先其次最后」，不要空话。' }
       ],
       onReason: startThinkClock,
-      onDelta: all => { stopThinkClock(); note.textContent = ''; out.textContent = all; }
+      onDelta: all => {
+        stopThinkClock();
+        note.textContent = rage ? '狂暴模式 · 这一段用的是 ' + rageModel + '（比普通档贵）' : '';
+        out.textContent = all;
+      }
     });
     out.textContent = text || '（模型这次没返回内容，点「重新生成」再试一次）';
     if (text) aiCacheSet('overall', code, '', text);
@@ -2546,6 +2908,197 @@ function refreshAIUI() {
   updateUsageText();
 }
 
+/* ---------- 从文件夹读代码（只有 APK 有原生实现） ---------- */
+const FILE_EXT = /\.(txt|c|cpp|cc|cxx|h|hpp|py|js|mjs|ts|jsx|tsx|java|kt|go|rs|sql|html|css|md|json|xml|yml|yaml|sh|bat|ps1)$/i;
+const FS_STATE = { uri: '', name: '', sub: '' };
+
+const FS = {
+  _p: null,
+  plugin() {
+    if (this._p) return this._p;
+    if (!nativePlatform || !window.Capacitor) return null;
+    const C = window.Capacitor;
+    this._p = (C.Plugins && C.Plugins.FolderSource) ||
+      (typeof C.registerPlugin === 'function' ? C.registerPlugin('FolderSource') : null);
+    return this._p || null;
+  },
+  async call(method, opts) {
+    if (!nativePlatform) throw new Error('这个功能只在装了的 App 里能用；网页版读不了手机文件夹');
+    const p = this.plugin();
+    if (!p || typeof p[method] !== 'function') throw new Error('这个版本的 App 还没带文件夹功能，先更新');
+    return p[method](opts || {});
+  }
+};
+
+function fmtSize(n) {
+  if (!n) return '';
+  if (n < 1024) return n + ' B';
+  if (n < 1024 * 1024) return Math.round(n / 1024) + ' KB';
+  return (n / 1024 / 1024).toFixed(1) + ' MB';
+}
+
+function renderFsList(items) {
+  const host = $('fsList');
+  const list = (items || []).filter(it => it && (it.isDir || FILE_EXT.test(it.name)));
+  list.sort((a, b) => (b.isDir ? 1 : 0) - (a.isDir ? 1 : 0) || String(a.name).localeCompare(String(b.name)));
+  if (!list.length) {
+    host.innerHTML = '<div class="empty">这个文件夹里没找到代码文件</div>';
+    return;
+  }
+  host.innerHTML = list.map(it =>
+    '<div class="fs-item" data-uri="' + escapeHtml(it.uri || '') + '" data-dir="' + (it.isDir ? '1' : '0') +
+    '" data-name="' + escapeHtml(it.name || '') + '" data-sub="' + escapeHtml(it.sub || '') + '">' +
+    '<span class="nm">' + (it.isDir ? '目录 · ' : '') + escapeHtml(it.name || '') + '</span>' +
+    '<span class="meta">' + (it.isDir ? '' : fmtSize(it.size)) + '</span></div>'
+  ).join('');
+}
+
+async function listFolder(sub) {
+  FS_STATE.sub = sub || '';
+  $('fsPath').textContent = FS_STATE.name + (FS_STATE.sub ? ' / ' + FS_STATE.sub.split('/').join(' / ') : '');
+  $('fsUp').hidden = !FS_STATE.sub;
+  $('fsList').innerHTML = '<div class="empty">读取中…</div>';
+  try {
+    const r = await FS.call('list', { sub: FS_STATE.sub });
+    renderFsList(r && r.items ? r.items : []);
+  } catch (e) {
+    $('fsList').innerHTML = '<div class="empty">' + escapeHtml((e && e.message) || '列不出来') + '</div>';
+  }
+}
+
+async function pickFolder() {
+  try {
+    const r = await FS.call('pick');
+    if (r && r.uri) {
+      FS_STATE.uri = r.uri;
+      FS_STATE.name = r.name || '已选文件夹';
+      await listFolder('');
+    }
+  } catch (e) {
+    toast((e && e.message) || '没选成', 2600);
+  }
+}
+
+async function openFiles() {
+  closeSheets();
+  openSheet('sheetFiles');
+  FS_STATE.sub = '';
+  $('fsUp').hidden = true;
+  if (!nativePlatform) {
+    $('fsPath').textContent = '网页版用不了这个';
+    $('fsList').innerHTML = '<div class="empty">手机上那版（APK）才能读文件夹；网页里没有这个权限。</div>';
+    return;
+  }
+  $('fsPath').textContent = '正在找上次选的文件夹…';
+  try {
+    const r = await FS.call('restore');
+    if (r && r.uri) {
+      FS_STATE.uri = r.uri;
+      FS_STATE.name = r.name || '已选文件夹';
+      await listFolder('');
+    } else {
+      $('fsPath').textContent = '还没选文件夹，点下面「选文件夹」';
+      $('fsList').innerHTML = '';
+    }
+  } catch (e) {
+    $('fsPath').textContent = (e && e.message) || '读不了';
+    $('fsList').innerHTML = '';
+  }
+}
+
+async function openCodeFile(item) {
+  if (item.dir) { await listFolder(item.sub); return; }
+  try {
+    const r = await FS.call('read', { uri: item.uri });
+    const text = (r && r.text) || '';
+    if (!text.trim()) { toast('这个文件是空的', 2000); return; }
+    $('code').value = text;
+    saveCode();
+    histRecordFile(item);
+    closeSheets();
+    doExplain();
+    setView('overall');
+    toast('载入 ' + item.name, 1800);
+  } catch (e) {
+    toast((e && e.message) || '读不出来', 3200);
+  }
+}
+
+/* ---------- 历史记录 ---------- */
+const HIST = {
+  all() {
+    try { const a = JSON.parse(LS.get('ce.hist', '[]')); return Array.isArray(a) ? a : []; } catch (e) { return []; }
+  },
+  save(arr) { LS.set('ce.hist', JSON.stringify(arr)); },
+  clear() { LS.del('ce.hist'); }
+};
+
+// 网页版：存代码本身，按字节封顶（内容不在 App 里囤的是 APK 那条路）
+function histRecordCode(code, lang) {
+  if (nativePlatform) return;
+  const body = String(code || '');
+  if (!body.trim()) return;
+  const h = hash32(body);
+  const arr = HIST.all().filter(x => x.h !== h);
+  const firstLine = body.split('\n').find(l => l.trim()) || '';
+  arr.unshift({
+    h,
+    code: body.length > 20000 ? body.slice(0, 20000) : body,
+    preview: firstLine.trim().slice(0, 60),
+    lines: body.split('\n').length,
+    lang: lang || '',
+    at: Date.now()
+  });
+  arr.sort((a, b) => (b.at || 0) - (a.at || 0));
+  const MAX_BYTES = 1200 * 1024;
+  const keep = [];
+  let total = 0;
+  for (const it of arr) {
+    const sz = (it.code || '').length;
+    if (keep.length >= 200 || total + sz > MAX_BYTES) continue;
+    keep.push(it);
+    total += sz;
+  }
+  HIST.save(keep);
+}
+
+// APK：只记「打开过哪个文件」，代码本身还在用户自己的文件夹里
+function histRecordFile(item) {
+  if (!nativePlatform) return;
+  const arr = HIST.all().filter(x => x.uri !== item.uri);
+  arr.unshift({ uri: item.uri, name: item.name, sub: item.sub || '', at: Date.now() });
+  HIST.save(arr.slice(0, 20));
+}
+
+function pad2(n) { return n < 10 ? '0' + n : String(n); }
+
+function renderHist() {
+  const host = $('histList');
+  const arr = HIST.all();
+  $('histHint').textContent = nativePlatform
+    ? '只记打开过哪些文件，代码还在你自己的文件夹里，App 不囤。'
+    : '只存在这台设备上；最多 1.2MB 或 200 段，超了从最旧的丢。';
+  if (!arr.length) {
+    host.innerHTML = '<div class="empty">还没有记录。</div>';
+    return;
+  }
+  host.innerHTML = arr.map((it, i) => {
+    const d = new Date(it.at || 0);
+    const stamp = (d.getMonth() + 1) + '/' + d.getDate() + ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+    const title = nativePlatform ? (it.name || '（文件）') : (it.preview || '（空）');
+    const meta = nativePlatform ? stamp : ((it.lines || 0) + ' 行');
+    return '<div class="fs-item" data-hist="' + i + '">' +
+      '<span class="nm">' + escapeHtml(title) + '</span>' +
+      '<span class="meta">' + escapeHtml(meta) + '</span></div>';
+  }).join('');
+}
+
+async function openHist() {
+  closeSheets();
+  openSheet('sheetHist');
+  renderHist();
+}
+
 /* ---------- 抽屉 ---------- */
 function openSheet(id) {
   $('mask').hidden = false;
@@ -2553,7 +3106,7 @@ function openSheet(id) {
 }
 function closeSheets() {
   $('mask').hidden = true;
-  ['sheetMore', 'sheetSettings', 'sheetLang', 'sheetFeedback'].forEach(id => { $(id).hidden = true; });
+  ['sheetMore', 'sheetSettings', 'sheetLang', 'sheetFeedback', 'sheetFiles', 'sheetHist'].forEach(id => { $(id).hidden = true; });
 }
 function openSettings() {
   closeSheets();
@@ -2881,6 +3434,48 @@ $('tab-overall').addEventListener('click', e => {
 });
 $('mask').addEventListener('click', closeSheets);
 $('miPaste').addEventListener('click', () => { closeSheets(); pasteIntoCode(); });
+$('miFiles').addEventListener('click', openFiles);
+$('miHist').addEventListener('click', openHist);
+$('fsPick').addEventListener('click', pickFolder);
+$('fsUp').addEventListener('click', () => {
+  const segs = FS_STATE.sub.split('/').filter(Boolean);
+  segs.pop();
+  listFolder(segs.join('/'));
+});
+$('fsClose').addEventListener('click', closeSheets);
+$('fsList').addEventListener('click', e => {
+  const el = e.target.closest('.fs-item');
+  if (!el) return;
+  openCodeFile({
+    uri: el.dataset.uri,
+    name: el.dataset.name,
+    sub: el.dataset.sub,
+    dir: el.dataset.dir === '1'
+  });
+});
+$('histList').addEventListener('click', e => {
+  const el = e.target.closest('[data-hist]');
+  if (!el) return;
+  const it = HIST.all()[parseInt(el.dataset.hist, 10)];
+  if (!it) return;
+  if (nativePlatform) {
+    closeSheets();
+    openCodeFile({ uri: it.uri, name: it.name, sub: it.sub, dir: false });
+  } else {
+    $('code').value = it.code || '';
+    saveCode();
+    closeSheets();
+    doExplain();
+    setView('overall');
+    toast('载入历史', 1500);
+  }
+});
+$('histClear').addEventListener('click', () => {
+  HIST.clear();
+  renderHist();
+  toast('历史已清空', 1600);
+});
+$('histClose').addEventListener('click', closeSheets);
 $('miCopy').addEventListener('click', () => { closeSheets(); copyCode(); });
 $('miClear').addEventListener('click', () => {
   closeSheets();
@@ -2948,9 +3543,38 @@ $('code').addEventListener('keydown', e => {
 $('lang').addEventListener('change', () => { saveCode(); if ($('code').value.trim()) doExplain(); });
 $('tab-lines').addEventListener('click', e => {
   const j = e.target.closest('[data-jump]');
-  if (!j) return;
-  e.stopPropagation();
-  jumpToLine(parseInt(j.dataset.jump, 10));
+  if (j) {
+    e.stopPropagation();
+    jumpToLine(parseInt(j.dataset.jump, 10));
+    return;
+  }
+  const head = e.target.closest('.ln-block-head');
+  if (head) {
+    const block = head.parentNode;
+    const rows = parseInt(head.dataset.rows, 10) || 0;
+    const folded = block.classList.toggle('folded');
+    const fold = head.querySelector('.fold');
+    if (fold) fold.textContent = folded ? '展开 ' + rows + ' 行' : '折叠';
+    return;
+  }
+  const item = e.target.closest('.ln-item[data-line]');
+  if (item) highlightSrcLine(item.dataset.line);
+});
+$('lintBar').addEventListener('click', e => {
+  const jump = e.target.closest('[data-jump]');
+  if (jump) { jumpToLine(parseInt(jump.dataset.jump, 10)); return; }
+  if (e.target.closest('[data-toggle-lint]')) {
+    lintOpen = !lintOpen;
+    $('lintBar').classList.toggle('open', lintOpen);
+    renderLintBar(lastResult);
+  }
+});
+$('btnLint').addEventListener('click', () => {
+  const on = !LINT.on();
+  LINT.set(on);
+  syncLintBtn();
+  if (lastResult) renderLines(lastResult);
+  toast(on ? '纠错已开' : '纠错已关', 1500);
 });
 $('tab-keywords').addEventListener('click', e => {
   const jump = e.target.closest('[data-jump]');
@@ -2991,7 +3615,7 @@ if (nativePlatform) {
 }
 
 /* ---------- 启动 ---------- */
-const APP_VERSION = '1.3.0';
+const APP_VERSION = '1.4.0';
 // 安全区由 CSS 变量 --safe-area-* 统一消费：浏览器里是 env() 兜底，
 // Android 壳里由 MainActivity 把系统栏尺寸写进行内样式（见那边注释）。
 // 这个 class 只留给诊断/样式钩子用，不再靠它压掉内边距。
@@ -3002,6 +3626,7 @@ if (savedCode) $('code').value = savedCode;
 syncGutter();
 if ($('code').value.trim()) doExplain(true);
 refreshAIUI();
+syncLintBtn();
 setView('code');
 $('verText').textContent = '版本 ' + APP_VERSION + ' · ' + (nativePlatform ? 'app' : 'pwa') + ' · 安全区 ' + insetsText();
 

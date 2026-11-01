@@ -32,6 +32,8 @@ public class MainActivity extends BridgeActivity {
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
+        // 先登记自定义插件，再交给 BridgeActivity 启动桥接
+        registerPlugin(FolderSourcePlugin.class);
         super.onCreate(savedInstanceState);
 
         if (Build.VERSION.SDK_INT < 35) return; // 老系统维持原样：状态栏不透明，内容本来就排在它下面
