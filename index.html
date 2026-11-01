@@ -469,6 +469,14 @@
       <option value="deepseek-v4-pro">deepseek-v4-pro（讲得更细，更贵）</option>
     </select>
   </div>
+  <div class="field">
+    <label>讲得多细</label>
+    <select id="aiThink">
+      <option value="off">快（不思考，最省，默认）</option>
+      <option value="low">细一点（多花约一半，多等 3 到 5 秒）</option>
+      <option value="high">最细（多花两三倍，多等 5 到 10 秒）</option>
+    </select>
+  </div>
   <p class="hint" id="aiUsage"></p>
   <div class="sheet-actions">
     <button class="btn" id="aiClear">清掉 Key</button>
@@ -2123,8 +2131,15 @@ const AI = {
   key: () => LS.get('ce.aikey', ''),
   base: () => (LS.get('ce.aibase', '') || 'https://api.deepseek.com').replace(/\/+$/, ''),
   model: () => LS.get('ce.aimodel', 'deepseek-flash'),
+  // 讲法档位：off = 不思考（默认，最省）/ low / high
+  think: () => {
+    const v = LS.get('ce.aithink', 'off');
+    return v === 'low' || v === 'high' ? v : 'off';
+  },
   ready() { return this.on() && !!this.key(); }
 };
+// 改了提示词就 +1：缓存 key 里带着它，老用户不会读到旧的硬文案
+const PROMPT_VER = 2;
 const AI_USAGE = {
   get total() { return parseInt(LS.get('ce.aitok', '0'), 10) || 0; },
   session: 0,
@@ -2144,7 +2159,7 @@ function aiCacheAll() {
   try { return JSON.parse(LS.get('ce.aicache', '{}')) || {}; } catch (e) { return {}; }
 }
 function aiCacheKey(kind, code, extra) {
-  return kind + '|' + AI.model() + '|' + hash32(code + '\u0000' + (extra || ''));
+  return kind + '|' + AI.model() + '|t' + AI.think() + '|p' + PROMPT_VER + '|' + hash32(code + '\u0000' + (extra || ''));
 }
 function aiCacheGet(kind, code, extra) {
   const all = aiCacheAll();
@@ -2181,10 +2196,10 @@ async function aiErrorText(resp) {
   return base + (detail ? '：' + detail : '');
 }
 
-async function readSSE(resp, onDelta) {
+async function readSSE(resp, onDelta, onReason) {
   const reader = resp.body.getReader();
   const dec = new TextDecoder();
-  let buf = '', out = '';
+  let buf = '', out = '', rea = '';
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
@@ -2201,6 +2216,11 @@ async function readSSE(resp, onDelta) {
         try { j = JSON.parse(payload); } catch (e) { continue; }
         if (j.usage) AI_USAGE.add(j.usage);
         const d = j.choices && j.choices[0] && j.choices[0].delta;
+        // 思考内容只用来提示「正在想」，不进正文
+        if (d && d.reasoning_content) {
+          rea += d.reasoning_content;
+          if (onReason) onReason(rea);
+        }
         if (d && d.content) {
           out += d.content;
           if (onDelta) onDelta(out);
@@ -2214,17 +2234,24 @@ async function readSSE(resp, onDelta) {
 async function aiChat(opts) {
   const key = AI.key();
   if (!key) throw new AIError('还没填 API Key：右上「⋯」→ 设置 / AI 通道');
+  const think = opts.think === undefined ? AI.think() : opts.think;
   const body = {
     model: AI.model(),
     messages: opts.messages,
     max_tokens: opts.maxTokens || 800,
-    temperature: opts.temperature === undefined ? 0.3 : opts.temperature,
     stream: !!opts.stream
   };
   if (opts.json) body.response_format = { type: 'json_object' };
   if (opts.stream) body.stream_options = { include_usage: true };
-  // 实测（2026-10-30）：thinking:disabled 在流式与非流式下都被接受，关掉思考省时省钱
-  body.thinking = { type: 'disabled' };
+  // 官方文档（思考模式）：thinking 默认开、effort 默认 high；
+  // 思考模式下 temperature/presence_penalty/frequency_penalty 不生效，传了只是噪音，所以不传。
+  if (think !== 'off') {
+    body.thinking = { type: 'enabled' };
+    body.reasoning_effort = think;
+  } else {
+    body.thinking = { type: 'disabled' };
+    body.temperature = opts.temperature === undefined ? 0.6 : opts.temperature;
+  }
   let resp;
   try {
     resp = await fetch(AI.base() + '/chat/completions', {
@@ -2244,7 +2271,7 @@ async function aiChat(opts) {
     const m = j.choices && j.choices[0] && j.choices[0].message;
     return (m && m.content) || '';
   }
-  return readSSE(resp, opts.onDelta);
+  return readSSE(resp, opts.onDelta, opts.onReason);
 }
 
 function stopAI() {
@@ -2262,7 +2289,13 @@ function newAbort() {
 
 /* 提示词 */
 function sysBase() {
-  return '你是一名耐心的中文编程老师，面向刚学编程的新手。只用简体中文回答，不用 Markdown 标题和表格，不要反问，不要编造行号。';
+  return '你是坐在旁边给人讲代码的同事，简体中文，口语，讲人话，面向刚学编程的新手。' +
+    '不要开场白、不要客套、不要复述整段代码。' +
+    '不要用 Markdown 标题、表格、星号列表——这个界面不渲染，会原样显示成井号和星号。' +
+    '不要反问，不要编造行号。' +
+    '遇到术语，先用一句话说清它在这儿干什么，再用它。' +
+    '类比可以用生活里的事，但不要编故事。' +
+    '不要写「本段代码实现了对数组的遍历」；写成「这段就是把每个数挨个看一遍」。';
 }
 
 /* 1) 整体 AI 详解 */
@@ -2310,17 +2343,33 @@ async function runOverallAI() {
   note.classList.remove('ai-err');
   out.textContent = '';
   out.innerHTML = '<span class="ai-cursor">●</span>';
+  // 思考档位下正文会晚到一大截，用计时告诉人它没死
+  const t0 = Date.now();
+  let thinkTimer = null;
+  const stopThinkClock = () => { if (thinkTimer) { clearInterval(thinkTimer); thinkTimer = null; } };
+  const startThinkClock = () => {
+    if (thinkTimer) return;
+    const tick = () => {
+      const s = Math.floor((Date.now() - t0) / 1000);
+      note.textContent = s >= 45
+        ? '这段有点绕，还在想；等不及可以点停止'
+        : '正在想…（0:' + (s < 10 ? '0' + s : String(s)) + '）';
+    };
+    tick();
+    thinkTimer = setInterval(tick, 1000);
+  };
   let text = '';
   try {
     text = await aiChat({
       stream: true,
-      maxTokens: 900,
+      maxTokens: 1400,
       signal: ctrl.signal,
       messages: [
         { role: 'system', content: sysBase() },
-        { role: 'user', content: '语言：' + langLabel(currentLang(code)) + '\n代码：\n```\n' + code + '\n```\n请说明：1) 这段代码整体做什么；2) 关键步骤按执行顺序；3) 最容易出错或最值得注意的地方。分三段，短句，200 到 350 字。' }
+        { role: 'user', content: '语言：' + langLabel(currentLang(code)) + '\n代码：\n```\n' + code + '\n```\n先用一句话说清这段代码想干什么。然后按它执行的顺序讲关键几步，讲到哪一行就提哪一行（写成「第 3 行」，不要编行号）。最后说这段代码最容易踩的坑，或者新手最容易看错的地方。250 到 500 字，像当面讲。不要列提纲，不要「首先其次最后」，不要空话。' }
       ],
-      onDelta: all => { out.textContent = all; }
+      onReason: startThinkClock,
+      onDelta: all => { stopThinkClock(); note.textContent = ''; out.textContent = all; }
     });
     out.textContent = text || '（模型这次没返回内容，点「重新生成」再试一次）';
     if (text) aiCacheSet('overall', code, '', text);
@@ -2336,6 +2385,7 @@ async function runOverallAI() {
       note.classList.add('ai-err');
     }
   } finally {
+    stopThinkClock();
     aiRun = null;
     runBtn.disabled = false;
     $('aiStop').hidden = true;
@@ -2374,10 +2424,11 @@ async function runLinesAI() {
     const list = todo.map(n => n + ': ' + res.lineTexts[n - 1]).join('\n');
     const text = await aiChat({
       json: true,
+      think: 'off',
       maxTokens: Math.min(2000, 200 + todo.length * 40),
       messages: [
         { role: 'system', content: sysBase() + '这次必须只输出一个 JSON 对象，形如 {"lines":[{"line":3,"note":"给变量 x 赋初值"}]}，不许有别的文字。' },
-        { role: 'user', content: '语言：' + langLabel(res.lang) + '\n下面是需要解释的行（行号: 代码）：\n' + list + '\n请给每一行一条不超过 30 个汉字的中文说明，只解释这一行在做什么。' }
+        { role: 'user', content: '语言：' + langLabel(res.lang) + '\n下面是需要解释的行（行号: 代码）：\n' + list + '\n请给每一行一条不超过 30 个汉字的中文说明，只解释这一行在做什么。像给人划重点，别用「初始化」这种词硬套。' }
       ]
     });
     applyAiLines(text, res);
@@ -2418,6 +2469,7 @@ async function runWordAI(term, cardEl) {
   try {
     const text = await aiChat({
       stream: true,
+      think: 'off',
       maxTokens: 400,
       messages: [
         { role: 'system', content: sysBase() },
@@ -2460,13 +2512,13 @@ async function sendAsk() {
   chat.scrollTop = chat.scrollHeight;
   const ctrl = newAbort();
   try {
-    const msgs = [{ role: 'system', content: sysBase() + '回答要短，围绕这段代码，最多 4 句话。' }]
+    const msgs = [{ role: 'system', content: sysBase() + '回答要短，围绕这段代码，最多 4 句话，说人话，别列条目。' }]
       .concat([{ role: 'user', content: '代码（' + langLabel(currentLang(code)) + '）：\n```\n' + code + '\n```' }])
       .concat(askHistory.slice(-6))
       .concat([{ role: 'user', content: q }]);
     const text = await aiChat({
       stream: true,
-      maxTokens: 500,
+      maxTokens: 900,
       signal: ctrl.signal,
       messages: msgs,
       onDelta: all => { bubble.textContent = all; chat.scrollTop = chat.scrollHeight; }
@@ -2509,6 +2561,7 @@ function openSettings() {
   $('aiKey').value = AI.key();
   $('aiBase').value = LS.get('ce.aibase', '') || '';
   $('aiModel').value = AI.model();
+  $('aiThink').value = AI.think();
   updateUsageText();
   $('verText').textContent = '版本 ' + APP_VERSION + ' · ' + (nativePlatform ? 'app' : 'pwa') + ' · 安全区 ' + insetsText();
   openSheet('sheetSettings');
@@ -2518,6 +2571,7 @@ function saveSettings() {
   LS.set('ce.aikey', $('aiKey').value.trim());
   LS.set('ce.aibase', $('aiBase').value.trim());
   LS.set('ce.aimodel', $('aiModel').value || 'deepseek-flash');
+  LS.set('ce.aithink', $('aiThink').value || 'off');
   closeSheets();
   refreshAIUI();
   toast(AI.ready() ? 'AI 已开启' : (AI.on() ? '开了 AI，但还没填 Key' : 'AI 已关闭，纯离线'));
@@ -2937,7 +2991,7 @@ if (nativePlatform) {
 }
 
 /* ---------- 启动 ---------- */
-const APP_VERSION = '1.2.1';
+const APP_VERSION = '1.3.0';
 // 安全区由 CSS 变量 --safe-area-* 统一消费：浏览器里是 env() 兜底，
 // Android 壳里由 MainActivity 把系统栏尺寸写进行内样式（见那边注释）。
 // 这个 class 只留给诊断/样式钩子用，不再靠它压掉内边距。
