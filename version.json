@@ -1,8 +1,8 @@
 {
-  "version": "1.5.0",
-  "build": 10,
+  "version": "1.6.0",
+  "build": 11,
   "apk": "apk/code-explainer.apk",
-  "notes": "feat: 接 tree-sitter 真解析，算法识别改成看结构不看变量名",
+  "notes": "feat: AI 芯片一键开关，开时校正离线结论并全量重讲逐行；详解加超时与接着讲",
   "feedback": {
     "issues": false,
     "repo": "l3j3y3/code-explainer"
