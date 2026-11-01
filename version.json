@@ -1,8 +1,8 @@
 {
-  "version": "1.4.0",
-  "build": 9,
+  "version": "1.5.0",
+  "build": 10,
   "apk": "apk/code-explainer.apk",
-  "notes": "feat: 块内整块源码、算法类型识别、离线纠错、狂暴档、从手机文件夹读代码",
+  "notes": "feat: 接 tree-sitter 真解析，算法识别改成看结构不看变量名",
   "feedback": {
     "issues": false,
     "repo": "l3j3y3/code-explainer"
