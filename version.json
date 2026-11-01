@@ -1,8 +1,8 @@
 {
-  "version": "1.2.1",
-  "build": 7,
+  "version": "1.3.0",
+  "build": 8,
   "apk": "apk/code-explainer.apk",
-  "notes": "fix(android): 安全区改成原生推 CSS 变量，顶栏不再被状态栏压住",
+  "notes": "feat: AI 详解改成当面讲的口气；思考档位做成设置项，默认不额外花钱",
   "feedback": {
     "issues": false,
     "repo": "l3j3y3/code-explainer"
