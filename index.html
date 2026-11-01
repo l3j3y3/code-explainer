@@ -1769,9 +1769,353 @@ function buildBlocks(lineTexts, lineNotes, ranges) {
   return blocks;
 }
 
-/* ================= 算法类型（离线启发式） =================
-   宁可漏报也不乱猜：分不够高就不说，两个候选咬得紧就都说出来。 */
-function detectAlgorithms(rawCode, langId) {
+/* ================= tree-sitter 语法解析（可选增强） =================
+   干两件事：精确指出语法错在哪、看结构认算法（不看变量名）。
+   加载不到 / 语言不支持 / 老浏览器 = 整个退回规则层，功能不因此不可用。 */
+const TSLANG = { c: 'c', cpp: 'cpp', java: 'java', js: 'javascript', python: 'python', css: 'css', html: 'html' };
+const TS_FILE = {
+  c: 'tree-sitter-c.wasm', cpp: 'tree-sitter-cpp.wasm', java: 'tree-sitter-java.wasm',
+  javascript: 'tree-sitter-javascript.wasm', python: 'tree-sitter-python.wasm',
+  css: 'tree-sitter-css.wasm', html: 'tree-sitter-html.wasm'
+};
+
+function tsTimeout(p, ms) {
+  return Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('解析器加载超时')), ms))]);
+}
+
+const TS = {
+  lib: null,
+  langs: new Map(),
+  parsers: new Map(),
+  failed: false,
+  initing: null,
+  async init() {
+    if (this.lib) return this.lib;
+    if (this.failed) return null;
+    if (this.initing) return this.initing;
+    this.initing = (async () => {
+      try {
+        const mod = await tsTimeout(import('./vendor/tree-sitter/web-tree-sitter.js'), 8000);
+        if (!mod || !mod.Parser) throw new Error('模块里没有 Parser');
+        await tsTimeout(mod.Parser.init({ locateFile: f => './vendor/tree-sitter/' + f }), 8000);
+        this.lib = mod;
+        return mod;
+      } catch (e) {
+        this.failed = true;
+        return null;
+      } finally {
+        this.initing = null;
+      }
+    })();
+    return this.initing;
+  },
+  async lang(id) {
+    if (!TS_FILE[id]) return null;
+    if (this.langs.has(id)) return this.langs.get(id);
+    const lib = await this.init();
+    if (!lib) return null;
+    const L = await lib.Language.load('./vendor/tree-sitter/' + TS_FILE[id]);
+    this.langs.set(id, L);
+    return L;
+  }
+};
+
+// 解析一段代码；返回 { tree } 或 null（null = 这轮用不上解析器）
+function tsParse(code, langId) {
+  const id = TSLANG[langId];
+  if (!id) return Promise.resolve(null);
+  return (async () => {
+    try {
+      const lib = await TS.init();
+      if (!lib) return null;
+      const L = await TS.lang(id);
+      if (!L) return null;
+      let parser = TS.parsers.get(id);
+      if (!parser) {
+        parser = new lib.Parser();
+        parser.setLanguage(L);
+        TS.parsers.set(id, parser);
+      }
+      return { tree: parser.parse(code), lib };
+    } catch (e) {
+      return null;
+    }
+  })();
+}
+
+function tsWalk(node, fn) {
+  if (!node) return;
+  fn(node);
+  for (let i = 0; i < node.childCount; i++) tsWalk(node.child(i), fn);
+}
+
+function tsEsc(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// 在条件里找出「两个标识符在比较」，返回 [左, 右, 运算符片段]
+function tsComparePair(node) {
+  let res = null;
+  tsWalk(node, n => {
+    if (res) return;
+    if (n.type !== 'binary_expression') return;
+    const t = n.text || '';
+    if (!(t.indexOf('<') >= 0 || t.indexOf('>') >= 0)) return;
+    const l = n.childForFieldName('left');
+    const r = n.childForFieldName('right');
+    if (!l || !r || l.type !== 'identifier' || r.type !== 'identifier') return;
+    res = [l.text, r.text, t];
+  });
+  return res;
+}
+
+/* ---------- 结构判据：全部不看变量名，只看「谁依赖谁、往哪边动」 ---------- */
+
+function fBinary(tree) {
+  const loops = [];
+  tsWalk(tree.rootNode, n => { if (n.type === 'while_statement' || n.type === 'for_statement') loops.push(n); });
+  for (const loop of loops) {
+    const pair = tsComparePair(loop.childForFieldName('condition'));
+    if (!pair) continue;
+    const body = loop.childForFieldName('body');
+    if (!body) continue;
+    const t = body.text || '';
+    const half = new RegExp('(\\w+)\\s*=\\s*\\(?[^;\\n]*' + tsEsc(pair[0]) + '[^;\\n]*' + tsEsc(pair[1]) + '[^;\\n]*(\\/\\s*2|>>\\s*1)');
+    const m = t.match(half);
+    if (!m) continue;
+    return ['循环条件在比较两个位置', '循环里把区间折半算出「' + m[1] + '」'];
+  }
+  return null;
+}
+
+function fDp(tree) {
+  let hit = null;
+  tsWalk(tree.rootNode, n => {
+    if (hit) return;
+    if (n.type !== 'assignment_expression') return;
+    const l = n.childForFieldName('left');
+    const r = n.childForFieldName('right');
+    if (!l || !r || l.type !== 'subscript_expression') return;
+    const inner = l.namedChildren[0];
+    if (!inner || inner.type !== 'subscript_expression') return;
+    const arr = inner.namedChildren[0];
+    if (!arr || arr.type !== 'identifier') return;
+    if ((r.text || '').indexOf(arr.text) >= 0) {
+      hit = ['用二维表逐格算', '当前这格是由表里已经算好的格子推出来的'];
+    }
+  });
+  return hit;
+}
+
+function fGreedy(tree) {
+  const calls = [];
+  tsWalk(tree.rootNode, n => { if (n.type === 'call_expression') calls.push(n); });
+  const hasSort = calls.some(c => {
+    const f = c.childForFieldName('function');
+    return f && /(^|\.)(sort|sorted|stable_sort|qsort)$/.test(f.text || '');
+  });
+  if (!hasSort) return null;
+  let body = null;
+  tsWalk(tree.rootNode, n => {
+    if (body) return;
+    if (n.type !== 'while_statement' && n.type !== 'for_statement') return;
+    const b = n.childForFieldName('body');
+    if (b && /(\+=|-=|\+\+|--|=)/.test(b.text || '')) body = b;
+  });
+  return body ? ['先排好序', '再从头到尾扫一遍、边走边定'] : null;
+}
+
+function fBfs(tree) {
+  const calls = [];
+  tsWalk(tree.rootNode, n => { if (n.type === 'call_expression') calls.push(n); });
+  const fnOf = c => ((c.childForFieldName('function') || {}).text) || '';
+  const hasPush = calls.some(c => /\.(push|push_back|append|offer|add)$/.test(fnOf(c)));
+  const hasPop = calls.some(c => /\.(pop|pop_front|popleft|poll|shift|front|back|top)$/.test(fnOf(c)));
+  if (!hasPush || !hasPop) return null;
+  let hasLoop = false;
+  tsWalk(tree.rootNode, n => { if (n.type === 'while_statement' || n.type === 'for_statement') hasLoop = true; });
+  return hasLoop ? ['用队列一类的东西存待处理的点', '一边往里放一边往外取'] : null;
+}
+
+function fTwoPtr(tree) {
+  let hit = null;
+  tsWalk(tree.rootNode, n => {
+    if (hit) return;
+    if (n.type !== 'while_statement') return;
+    const pair = tsComparePair(n.childForFieldName('condition'));
+    if (!pair) return;
+    const body = n.childForFieldName('body');
+    if (!body) return;
+    const t = body.text || '';
+    const a = new RegExp(tsEsc(pair[0]) + '\\s*(\\+\\+|--|\\+=|-=)');
+    const b = new RegExp(tsEsc(pair[1]) + '\\s*(\\+\\+|--|\\+=|-=)');
+    if (a.test(t) && b.test(t)) hit = ['两个位置同时在动', '一个往前一个往后（或一起走）'];
+  });
+  return hit;
+}
+
+function fEnum(tree) {
+  let maxDepth = 0;
+  const rec = (node, d) => {
+    const nd = (node.type === 'for_statement' || node.type === 'while_statement') ? d + 1 : d;
+    if (nd > maxDepth) maxDepth = nd;
+    for (let i = 0; i < node.childCount; i++) rec(node.child(i), nd);
+  };
+  rec(tree.rootNode, 0);
+  return maxDepth >= 3 ? ['套了三层以上的循环', '一个个试过去'] : null;
+}
+
+function detectAlgorithmsFromTree(tree, langId) {
+  const out = [];
+  const add = (id, name, reasons, score) => out.push({ id, name, score: score, reasons: reasons, from: 'ast' });
+  try {
+    const b = fBinary(tree); if (b) add('binary', '二分查找', b, 5);
+    const d = fDp(tree); if (d) add('dp', '动态规划', d, 5);
+    const bf = fBfs(tree); if (bf) add('bfs', '广度优先搜索', bf, 5);
+    const tp = fTwoPtr(tree); if (tp) add('twoptr', '双指针', tp, 4);
+    const g = fGreedy(tree); if (g) add('greedy', '贪心', g, 3);
+    const e = fEnum(tree); if (e) add('bruteforce', '枚举 / 暴力', e, 3);
+  } catch (err) {}
+  return out;
+}
+
+/* ---------- 语法错 + 四条语义检查 ---------- */
+
+function lintFromTree(tree, code) {
+  const out = [];
+  const lines = String(code || '').split(/\r?\n/);
+  const push = (n, sev, msg) => {
+    const ln = n.startPosition.row + 1;
+    const src = (lines[ln - 1] || '').trim();
+    out.push({
+      line: ln,
+      col: n.startPosition.column + 1,
+      severity: sev,
+      msg: msg,
+      hint: src ? '这一行：' + src.slice(0, 40) : ''
+    });
+  };
+  const visit = node => {
+    if (out.length >= 40) return;
+    if (node.type === 'ERROR') { push(node, 'error', '这一段不符合语法，编译器会在这儿报错'); return; }
+    if (node.isMissing) { push(node, 'error', '这里少了一个「' + node.type + '」'); return; }
+    for (let i = 0; i < node.childCount; i++) visit(node.child(i));
+  };
+  visit(tree.rootNode);
+  return out;
+}
+
+// 循环条件里「被比较的那个标识符」和运算符；右边是字面量也要能取到（while (i < 10)）
+function tsLoopCmp(cond) {
+  let res = null;
+  tsWalk(cond, n => {
+    if (res) return;
+    if (n.type !== 'binary_expression') return;
+    const t = n.text || '';
+    const m = t.match(/<=|>=|<|>/);
+    if (!m) return;
+    const l = n.childForFieldName('left');
+    if (l && l.type === 'identifier') res = { v: l.text, op: m[0] };
+  });
+  return res;
+}
+
+function semanticChecks(tree) {
+  const out = [];
+  const add = (n, sev, msg) => out.push({
+    line: n.startPosition.row + 1, col: n.startPosition.column + 1, severity: sev, msg: msg, hint: ''
+  });
+  tsWalk(tree.rootNode, n => {
+    if (out.length >= 12) return;
+    // 自己给自己赋值
+    if (n.type === 'assignment_expression') {
+      const l = n.childForFieldName('left');
+      const r = n.childForFieldName('right');
+      if (l && r && l.text === r.text) add(n, 'warn', '自己给自己赋值，这一句等于没写');
+    }
+    // 死循环 / 方向反了
+    if (n.type === 'while_statement' || n.type === 'for_statement') {
+      const c = tsLoopCmp(n.childForFieldName('condition'));
+      const body = n.childForFieldName('body');
+      if (!c || !body) return;
+      const t = body.text || '';
+      const V = tsEsc(c.v);
+      const inc = new RegExp('\\b' + V + '\\b\\s*(\\+\\+|\\+=)');
+      const dec = new RegExp('\\b' + V + '\\b\\s*(--|-=)');
+      const assign = new RegExp('\\b' + V + '\\b\\s*=(?!=)');
+      const up = inc.test(t);
+      const down = dec.test(t);
+      const changed = up || down || assign.test(t);
+      if (!changed) {
+        add(n, 'warn', '循环条件里的「' + c.v + '」在循环体里一直没变，可能停不下来');
+      } else if ((c.op === '<' || c.op === '<=') && down && !up && !assign.test(t)) {
+        add(n, 'warn', '条件是「' + c.op + '」，但循环里「' + c.v + '」在往回走，方向可能反了');
+      }
+    }
+    // 除以零
+    if (n.type === 'binary_expression') {
+      const t = (n.text || '').replace(/\s+/g, '');
+      if (/\/0(?![.\d])/.test(t)) add(n, 'error', '这儿除以 0 了，跑起来会崩');
+    }
+  });
+  return out;
+}
+
+function mergeLint(base, extra) {
+  const out = extra.slice();
+  const seen = new Set(out.map(x => x.line + '|' + x.severity));
+  // 解析器已经给出精确位置时，规则层那几条「某个括号没关/对不上」就是重复噪音，直接让位
+  const tsHasSyntaxError = out.some(x => x.severity === 'error');
+  (base || []).forEach(x => {
+    if (tsHasSyntaxError && x.severity === 'error' && /对不上|没关|开着/.test(x.msg)) return;
+    const k = x.line + '|' + x.severity;
+    if (seen.has(k)) return;
+    seen.add(k);
+    out.push(x);
+  });
+  return out.sort((a, b) => a.line - b.line).slice(0, 40);
+}
+
+function mergeAlgo(base, extra) {
+  const map = new Map();
+  (base || []).forEach(a => map.set(a.id, { id: a.id, name: a.name, score: a.score, reasons: a.reasons.slice() }));
+  (extra || []).forEach(a => {
+    const cur = map.get(a.id);
+    if (cur) {
+      cur.score = Math.max(cur.score, a.score) + 1;
+      cur.reasons = cur.reasons.concat(a.reasons).slice(0, 4);
+    } else {
+      map.set(a.id, { id: a.id, name: a.name, score: a.score, reasons: a.reasons.slice() });
+    }
+  });
+  return [...map.values()].sort((a, b) => b.score - a.score);
+}
+
+/* 解析回来之后把结果并进去：先出规则结果，解析完成再刷一次，用户不会看到空白 */
+let refineSeq = 0;
+async function refineAnalysis(res, code) {
+  if (!res) return;
+  const seq = ++refineSeq;
+  const p = await tsParse(code, res.lang);
+  if (!p || seq !== refineSeq) return;
+  try {
+    const treeLint = lintFromTree(p.tree, code).concat(semanticChecks(p.tree));
+    res.lint = mergeLint(res.lint || [], treeLint);
+    res.algo = mergeAlgo(res.algo || [], detectAlgorithmsFromTree(p.tree, res.lang));
+    res.tsOk = true;
+  } catch (e) {
+    return;
+  }
+  if (lastResult === res) {
+    renderLintBar(res);
+    renderAlgoCard(res);
+  }
+}
+
+/* ================= 算法类型：第一层看字面（离线兜底） =================
+   宁可漏报也不乱猜：分不够高就不说，两个候选咬得紧就都说出来。
+   这一层只认写法关键词，换了变量名就认不出——tree-sitter 那一层负责补这个。 */
+function detectAlgorithmsByText(rawCode, langId) {
   const c = String(rawCode || '');
   const hit = re => re.test(c);
   const out = [];
@@ -1976,7 +2320,7 @@ function analyze(rawCode, langId) {
     lineNotes,
     tokenLines,
     notedCount,
-    algo: detectAlgorithms(rawCode, langId),
+    algo: detectAlgorithmsByText(rawCode, langId),
     lint: lintCode(rawCode, langId),
     keywords: collectKeywords(tokenLines, langId)
   };
@@ -2145,6 +2489,7 @@ function doExplain(quiet) {
   renderAll(lastResult);
   updateLangChip(lastResult);
   histRecordCode(code, langId);
+  refineAnalysis(lastResult, code);
   if (!quiet && auto && det && !det.confident) toast('这段代码像好几种语言，点顶上「识别」看候选', 2600);
 }
 function renderAll(res) {
@@ -2176,25 +2521,35 @@ function setFilterCounts(total, noted) {
   if (nd) nd.innerHTML = '只看要点 <span class="cnt">' + noted + '</span>';
 }
 
+/* 算法卡单独成一块：解析器回来时只刷它，不动整页 */
+function algoCardHtml(res) {
+  const algos = (res && res.algo) || [];
+  if (!algos.length) {
+    return '<div class="algo-card"><span class="muted">没看出典型算法——可能就是普通逻辑，或者写法跟常见套路不一样。</span></div>';
+  }
+  const top = algos[0];
+  const second = algos[1];
+  let title = top.name;
+  if (second && (top.score - second.score) / Math.max(top.score, 1) < 0.2) {
+    title = '可能是 ' + top.name + '，也可能是 ' + second.name;
+  }
+  const note = (res && res.tsOk)
+    ? '按语法结构认的，换变量名不影响；但逻辑对不对它看不出来。'
+    : '按写法关键词猜的，换了变量名可能就认不出（语法分析器还没就绪）。';
+  return '<div class="algo-card"><div class="algo-name">' + escapeHtml(title) + '</div>' +
+    '<ul class="algo-why">' + top.reasons.map(r => '<li>' + escapeHtml(r) + '</li>').join('') + '</ul>' +
+    '<p class="muted" style="font-size:12px;margin:6px 0 0">' + escapeHtml(note) + '</p></div>';
+}
+
+function renderAlgoCard(res) {
+  const host = $('algoCard');
+  if (host) host.innerHTML = algoCardHtml(res);
+}
+
 function renderOverall(res) {
   const html = [];
   html.push('<div class="summary-card">' + escapeHtml(res.summary) + '</div>');
-  // 算法类型：离线按写法猜，分咬得紧就把两个都说出来
-  const algos = res.algo || [];
-  html.push('<h3 class="sec">算法类型</h3>');
-  if (algos.length) {
-    const top = algos[0];
-    const second = algos[1];
-    let title = top.name;
-    if (second && (top.score - second.score) / Math.max(top.score, 1) < 0.2) {
-      title = '可能是 ' + top.name + '，也可能是 ' + second.name;
-    }
-    html.push('<div class="algo-card"><div class="algo-name">' + escapeHtml(title) + '</div>' +
-      '<ul class="algo-why">' + top.reasons.map(r => '<li>' + escapeHtml(r) + '</li>').join('') + '</ul>' +
-      '<p class="muted" style="font-size:12px;margin:6px 0 0">离线按写法猜的，拿不准会更正；要准可以点下面 AI 详解让它一起说。</p></div>');
-  } else {
-    html.push('<div class="algo-card"><span class="muted">没看出典型算法——可能就是普通逻辑，或者写法跟常见套路不一样。</span></div>');
-  }
+  html.push('<h3 class="sec">算法类型</h3><div id="algoCard">' + algoCardHtml(res) + '</div>');
   const defBlocks = res.blocks.filter(b => b.kind === 'def');
   const defs = [];
   res.classes.forEach(c => defs.push({ line: c.line, sig: 'class ' + c.name, kind: '类' }));
@@ -2270,10 +2625,16 @@ function renderLintBar(res) {
   if (!LINT.on()) { host.hidden = true; host.innerHTML = ''; return; }
   host.hidden = false;
   const list = (res && res.lint) || [];
+  const lang = res && res.lang;
   if (!list.length) {
     host.classList.add('ok');
     host.classList.remove('open');
-    host.innerHTML = '<div class="lint-head">没查出明显问题 · <span class="muted">离线只看基础错误，语义问题得让 AI 看</span></div>';
+    let why;
+    if (res && res.tsOk) why = '语法解析过了，没发现语法错；逻辑对不对得看运行结果';
+    else if (TS.failed) why = '语法解析器没加载上，只做了基础检查';
+    else if (TSLANG[lang]) why = '基础检查没问题；语法解析器就绪后会再看一遍';
+    else why = '这类语言只做基础检查';
+    host.innerHTML = '<div class="lint-head">没查出明显问题 · <span class="muted">' + escapeHtml(why) + '</span></div>';
     return;
   }
   host.classList.remove('ok');
@@ -3615,7 +3976,7 @@ if (nativePlatform) {
 }
 
 /* ---------- 启动 ---------- */
-const APP_VERSION = '1.4.0';
+const APP_VERSION = '1.5.0';
 // 安全区由 CSS 变量 --safe-area-* 统一消费：浏览器里是 env() 兜底，
 // Android 壳里由 MainActivity 把系统栏尺寸写进行内样式（见那边注释）。
 // 这个 class 只留给诊断/样式钩子用，不再靠它压掉内边距。

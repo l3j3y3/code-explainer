@@ -16,6 +16,11 @@ for (const f of files) {
   fs.copyFileSync(path.join(repoRoot, f), path.join(dist, f));
 }
 fs.cpSync(path.join(repoRoot, 'icons'), path.join(dist, 'icons'), { recursive: true });
+// vendor/ 是 tree-sitter 的 wasm（约 5.6MB），要一起进 APK 才能离线解析；说明文件不用带
+fs.cpSync(path.join(repoRoot, 'vendor'), path.join(dist, 'vendor'), {
+  recursive: true,
+  filter: src => !src.endsWith('.md')
+});
 
 const total = fs.readdirSync(dist).map(f => {
   const p = path.join(dist, f);
